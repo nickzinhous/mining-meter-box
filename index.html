@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Caixa de amostras — taquinhos</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>Caixa para amostras</h1>
+        <p class="subtitle">
+          O taquinho fica no fim da recuperação acumulada. O avanço só marca a
+          profundidade perfurada. Cada caixa tem 3 canaletas de 1&nbsp;m.
+        </p>
+      </header>
+
+      <div class="layout">
+        <section class="panel" aria-labelledby="form-title">
+          <h2 id="form-title">Novo taquinho</h2>
+          <form id="taquinho-form" class="form">
+            <label class="field">
+              <span>Avanço (m)</span>
+              <input
+                name="avanco"
+                type="text"
+                inputmode="decimal"
+                placeholder="ex.: 3,00"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label class="field">
+              <span>Recuperação (m)</span>
+              <input
+                name="recuperacao"
+                type="text"
+                inputmode="decimal"
+                placeholder="ex.: 2,70"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label class="field field--full">
+              <span>Informação</span>
+              <input
+                name="info"
+                type="text"
+                placeholder="ex.: arenito"
+                maxlength="80"
+              />
+            </label>
+            <button type="submit" class="btn">Adicionar taquinho</button>
+          </form>
+          <p id="form-error" class="form-error" hidden></p>
+          <p id="form-note" class="form-note" hidden></p>
+          <p id="accum-summary" class="accum-summary" hidden></p>
+
+          <h2 class="list-title">Taquinhos</h2>
+          <ul id="taquinho-list" class="taquinho-list"></ul>
+          <p id="list-empty" class="list-empty">Nenhum taquinho ainda.</p>
+
+          <h2 class="list-title">Localizar profundidade</h2>
+          <form id="locate-form" class="form">
+            <label class="field field--full">
+              <span>Profundidade desejada (m)</span>
+              <input
+                name="profundidade"
+                type="text"
+                inputmode="decimal"
+                placeholder="ex.: 2,45"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <button type="submit" class="btn">Calcular na trena</button>
+          </form>
+          <p id="locate-result" class="calc-result" hidden></p>
+
+          <h2 class="list-title">Profundidade pela trena</h2>
+          <form id="inverse-form" class="form">
+            <label class="field field--full">
+              <span>Intervalo</span>
+              <select name="intervalo"></select>
+            </label>
+            <label class="field field--full">
+              <span>Distância na trena (m)</span>
+              <input
+                name="trena"
+                type="text"
+                inputmode="decimal"
+                placeholder="ex.: 0,30"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <button type="submit" class="btn">Calcular profundidade</button>
+          </form>
+          <p id="inverse-result" class="calc-result" hidden></p>
+        </section>
+
+        <section class="workspace" aria-label="Vista superior da caixa">
+          <div class="scale scale--length" aria-hidden="true">0 cm<br />↓<br />100 cm</div>
+
+          <div class="box-wrap">
+            <div class="zoom-bar">
+              <button type="button" id="zoom-out" aria-label="Diminuir zoom">−</button>
+              <button type="button" id="zoom-in" aria-label="Aumentar zoom">+</button>
+              <button type="button" id="zoom-reset">Ver tudo</button>
+              <span id="zoom-label">100%</span>
+            </div>
+            <svg
+              id="tray-svg"
+              class="tray-svg"
+              viewBox="0 0 36 106"
+              preserveAspectRatio="xMidYMid meet"
+              role="img"
+              aria-labelledby="tray-title tray-desc"
+            >
+              <title id="tray-title">Caixa com três canaletas</title>
+              <desc id="tray-desc">
+                Vista superior com taquinhos de dois centímetros e meio.
+              </desc>
+            <defs></defs>
+              <g id="tray-root"></g>
+              <g id="cores-root"></g>
+              <g id="taquinhos-root"></g>
+              <g id="marks-root"></g>
+            </svg>
+
+            <p class="scale scale--width">Cada canaleta tem 7 cm. Role o mouse para zoom.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
