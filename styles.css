@@ -352,18 +352,61 @@ select {
   border-left-color: #64748b;
 }
 
-.taquinho-list li strong {
-  display: block;
-  margin-bottom: 0.2rem;
-  font-size: 0.84rem;
-  font-weight: 650;
+.card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  margin-bottom: 0.55rem;
 }
 
-.taquinho-list li span.meta {
-  display: block;
+.taquinho-list li strong {
+  font-size: 0.92rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.chip {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.specs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 0.65rem;
+  margin: 0;
+}
+
+.specs dt {
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--muted);
-  font-size: 0.75rem;
+}
+
+.specs dd {
+  margin: 0.08rem 0 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.card-note,
+.card-info {
+  margin: 0.55rem 0 0;
+  font-size: 0.74rem;
   line-height: 1.4;
+}
+
+.card-note {
+  color: var(--amber);
+}
+
+.card-info {
+  color: var(--text);
 }
 
 .btn-remove {

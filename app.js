@@ -545,20 +545,27 @@ function renderList(intervals) {
     const place = hasCore ? placement(t.recuperacaoFinalMm) : null;
     const where = place
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
-      : "Sem ocupação na caixa";
+      : "Sem testemunho na caixa";
+    const depth = `${formatMeters(t.profundidadeInicialMm).replace(" m", "")}–${formatMeters(t.profundidadeFinalMm)}`;
+    const recovered = `${formatMeters(t.recuperacaoInicialMm).replace(" m", "")}–${formatMeters(t.recuperacaoFinalMm)}`;
     li.innerHTML = `
-      <div>
-        <strong>Taquinho ${t.index + 1} · ${where}</strong>
-        <span class="meta">avanço ${formatMeters(t.avancoMm)} · recuperação ${formatMeters(t.recuperacaoMm)}</span>
-        <span class="meta">profundidade ${formatMeters(t.profundidadeInicialMm)}–${formatMeters(t.profundidadeFinalMm)}</span>
-        <span class="meta">recuperação acumulada ${formatMeters(t.recuperacaoInicialMm)}–${formatMeters(t.recuperacaoFinalMm)}</span>
+      <div class="card-body">
+        <div class="card-head">
+          <strong>Taquinho ${t.index + 1}</strong>
+          <span class="chip">${where}</span>
+        </div>
+        <dl class="specs">
+          <div><dt>Profundidade</dt><dd>${depth}</dd></div>
+          <div><dt>Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
+          <div><dt>Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
+          <div><dt>Na caixa</dt><dd>${hasCore ? recovered : "—"}</dd></div>
+        </dl>
         ${
-          place
-            ? `<span class="meta">fim do testemunho ${formatCmFromMm(t.recuperacaoFinalMm)} → friso ${formatCm(place.topStart)}–${formatCm(place.topEnd)}</span>`
+          place?.shifted
+            ? `<p class="card-note">O bloco não coube no fim da canaleta e passou para o vão de ${formatCm(place.topStart)} a ${formatCm(place.topEnd)}.</p>`
             : ""
         }
-        ${place?.shifted ? `<span class="meta">não cabe no vão de 1 cm; entra no próximo friso de 2 cm</span>` : ""}
-        ${t.info ? `<span class="meta">${escapeHtml(t.info)}</span>` : ""}
+        ${t.info ? `<p class="card-info">${escapeHtml(t.info)}</p>` : ""}
       </div>`;
     const btn = document.createElement("button");
     btn.type = "button";
