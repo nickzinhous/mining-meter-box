@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Caixa de amostras — taquinhos</title>
+    <title>Caixa de testemunhos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -25,7 +31,13 @@
       <div class="layout">
         <section class="panel" aria-labelledby="form-title">
           <section class="side-block">
-          <h2 id="form-title">Novo taquinho</h2>
+          <h2 id="form-title">
+            <svg class="title-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 2.5v11M3.5 8h9" />
+              <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+            </svg>
+            Novo taquinho
+          </h2>
           <form id="taquinho-form" class="form">
             <label class="field">
               <span>Avanço (m)</span>
@@ -66,13 +78,24 @@
           </section>
 
           <section class="side-block">
-          <h2 class="list-title">Taquinhos</h2>
+          <h2 class="list-title">
+            <svg class="title-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3 4.5h10M3 8h10M3 11.5h7" />
+            </svg>
+            Taquinhos
+          </h2>
           <ul id="taquinho-list" class="taquinho-list"></ul>
           <p id="list-empty" class="list-empty">Nenhum taquinho ainda.</p>
           </section>
 
           <section class="side-block">
-          <h2 class="list-title">Localizar profundidade</h2>
+          <h2 class="list-title">
+            <svg class="title-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="2.2" />
+              <path d="M8 1.8v2.2M8 12v2.2M1.8 8h2.2M12 8h2.2" />
+            </svg>
+            Localizar profundidade
+          </h2>
           <form id="locate-form" class="form">
             <label class="field field--full">
               <span>Profundidade desejada (m)</span>
@@ -91,7 +114,12 @@
           </section>
 
           <section class="side-block">
-          <h2 class="list-title">Profundidade pela trena</h2>
+          <h2 class="list-title">
+            <svg class="title-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2.5 11.5h11M4 11.5v-2M7 11.5V7.5M10 11.5V6M13 11.5V4.5" />
+            </svg>
+            Profundidade pela trena
+          </h2>
           <form id="inverse-form" class="form">
             <label class="field field--full">
               <span>Intervalo</span>
@@ -115,8 +143,6 @@
         </section>
 
         <section class="workspace" aria-label="Vista superior da caixa">
-          <div class="scale scale--length" aria-hidden="true">0 cm<br />↓<br />100 cm</div>
-
           <div class="box-wrap">
             <div class="zoom-bar">
               <button type="button" id="zoom-out" aria-label="Diminuir zoom">−</button>

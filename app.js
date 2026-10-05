@@ -12,7 +12,7 @@ const OVERHANG = (TOP_LEN - BODY_LEN) / 2;
 
 const totalW = WALL_W * 2 + CHANNELS * CHANNEL_W + (CHANNELS - 1) * DIVIDER_W;
 const MM = 10;
-const CORE_COLORS = ["#8d6e63", "#6d8b74", "#7a8494", "#a6845a", "#6f7f8c"];
+const CORE_COLORS = ["#8d6b4a", "#3f6f62", "#4c6280", "#6d5a78", "#5f7048"];
 
 /** Intervalo informado. A posição física é derivada da recuperação acumulada. */
 /** @type {{ id: string, avancoMm: number, recuperacaoMm: number, info: string }[]} */
@@ -234,7 +234,7 @@ function addFrisos(group, xEdge, y0, direction) {
         y1: y,
         x2: xEdge + direction * len,
         y2: y,
-        stroke: "#c4c4c4",
+        stroke: "#64748b",
         "stroke-width": 1,
         "vector-effect": "non-scaling-stroke",
       }),
@@ -255,7 +255,7 @@ function drawCmGrid(group, x, y, w) {
         y1: y,
         x2: x + xu(i),
         y2: y + LENGTH,
-        stroke: "#3a3a3a",
+        stroke: "#243044",
         "stroke-width": 1,
         "vector-effect": "non-scaling-stroke",
       }),
@@ -271,7 +271,7 @@ function drawCmGrid(group, x, y, w) {
         y1: y + cm,
         x2: x + w,
         y2: y + cm,
-        stroke: major ? "#6e6e6e" : mid ? "#4a4a4a" : "#333333",
+        stroke: major ? "#5b6b84" : mid ? "#3d4d66" : "#2a3648",
         "stroke-width": major ? 1.25 : 1,
         "vector-effect": "non-scaling-stroke",
       }),
@@ -293,7 +293,7 @@ function addSideCmTicks(group, xEdge, y0, direction) {
         y1: y,
         x2: xEdge + direction * len,
         y2: y,
-        stroke: "#8eb8d4",
+        stroke: "#38bdf8",
         "stroke-width": cm % 10 === 0 ? 1.4 : 1,
         "vector-effect": "non-scaling-stroke",
       }),
@@ -303,9 +303,9 @@ function addSideCmTicks(group, xEdge, y0, direction) {
         x: xEdge + direction * (major + 0.2),
         y: y + 0.32,
         "text-anchor": direction < 0 ? "end" : "start",
-        fill: "#b7d4ea",
+        fill: "#bae6fd",
         "font-size": 0.85,
-        "font-family": "Segoe UI, system-ui, sans-serif",
+        "font-family": "Inter, Segoe UI, system-ui, sans-serif",
       });
       label.textContent = String(cm);
       group.appendChild(label);
@@ -326,8 +326,8 @@ function drawBox(parent, boxIndex) {
       width: xu(totalW),
       height: LENGTH + LABEL_BAND,
       rx: 0.25,
-      fill: "#1c1c1c",
-      stroke: "#f2f2f2",
+      fill: "#1a2230",
+      stroke: "#7dd3fc",
       "stroke-width": 1.5,
       "vector-effect": "non-scaling-stroke",
     }),
@@ -336,10 +336,10 @@ function drawBox(parent, boxIndex) {
   const title = el("text", {
     x: ox + 0.4,
     y: PAD_T + 1.35,
-    fill: "#f2f2f2",
+    fill: "#e2e8f0",
     "font-size": 1.05,
     "font-weight": "600",
-    "font-family": "Segoe UI, system-ui, sans-serif",
+    "font-family": "Inter, Segoe UI, system-ui, sans-serif",
   });
   title.textContent = `Caixa ${boxIndex + 1}`;
   shell.appendChild(title);
@@ -355,7 +355,7 @@ function drawBox(parent, boxIndex) {
         y: y0,
         width: xu(CHANNEL_W),
         height: LENGTH,
-        fill: "#0a0a0a",
+        fill: "#0b1018",
       }),
     );
     drawCmGrid(shell, x, y0, xu(CHANNEL_W));
@@ -367,9 +367,9 @@ function drawBox(parent, boxIndex) {
       x: x + xu(CHANNEL_W) / 2,
       y: y0 + 3.4,
       "text-anchor": "middle",
-      fill: "#d0d0d0",
+      fill: "#94a3b8",
       "font-size": 0.95,
-      "font-family": "Segoe UI, system-ui, sans-serif",
+      "font-family": "Inter, Segoe UI, system-ui, sans-serif",
     });
     range.textContent = `${i + 1} · ${slotStart}–${slotStart + LENGTH}`;
     shell.appendChild(range);
@@ -383,8 +383,8 @@ function drawBox(parent, boxIndex) {
           y: y0,
           width: xu(DIVIDER_W),
           height: LENGTH,
-          fill: "#2a2a2a",
-          stroke: "#777",
+          fill: "#243044",
+          stroke: "#475569",
           "stroke-width": 1,
           "vector-effect": "non-scaling-stroke",
         }),
@@ -473,8 +473,8 @@ function renderTaquinhos(intervals) {
         y: topY,
         width: xu(CHANNEL_W),
         height: TOP_LEN,
-        fill: "#f6d36b",
-        stroke: "#a16207",
+        fill: "#7dd3fc",
+        stroke: "#0369a1",
         "stroke-width": 1,
         "vector-effect": "non-scaling-stroke",
         rx: 0.08,
@@ -487,8 +487,8 @@ function renderTaquinhos(intervals) {
         y: bodyY,
         width: xu(CHANNEL_W),
         height: BODY_LEN,
-        fill: "#c2410c",
-        stroke: "#7c2d12",
+        fill: "#0284c7",
+        stroke: "#0c4a6e",
         "stroke-width": 1,
         "vector-effect": "non-scaling-stroke",
       }),
@@ -500,7 +500,7 @@ function renderTaquinhos(intervals) {
         y1: topY + TOP_LEN / 2,
         x2: cx + xu(CHANNEL_W),
         y2: topY + TOP_LEN / 2,
-        stroke: "#451a03",
+        stroke: "#082f49",
         "stroke-width": 1,
         "vector-effect": "non-scaling-stroke",
       }),
@@ -509,9 +509,9 @@ function renderTaquinhos(intervals) {
     const label = el("text", {
       x: cx + xu(CHANNEL_W) + 0.2,
       y: topY + TOP_LEN / 2 + 0.3,
-      fill: "#f6d36b",
+      fill: "#e0f2fe",
       "font-size": 0.7,
-      "font-family": "Segoe UI, system-ui, sans-serif",
+      "font-family": "Inter, Segoe UI, system-ui, sans-serif",
     });
     const depthLabel = formatMeters(t.profundidadeFinalMm);
     label.textContent = t.info ? `${depthLabel} ${truncate(t.info, 12)}` : depthLabel;
