@@ -917,6 +917,7 @@ function applyCamera() {
   camera.cx = x + w / 2;
   camera.cy = y + h / 2;
   svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+  svg.classList.toggle("is-zoomed", camera.zoom > 1);
   const label = document.getElementById("zoom-label");
   if (label) label.textContent = `${Math.round(camera.zoom * 100)}%`;
 }
