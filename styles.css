@@ -689,9 +689,13 @@ select {
 }
 
 .login-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
   min-height: 100%;
   display: grid;
   place-items: center;
+  background: var(--bg);
   padding:
     max(1.25rem, env(safe-area-inset-top))
     max(1rem, env(safe-area-inset-right))
@@ -705,11 +709,11 @@ select {
 }
 
 html.has-session .login-screen {
-  display: none;
+  display: none !important;
 }
 
 html:not(.has-session) .app {
-  display: none;
+  display: none !important;
 }
 
 .login-card {

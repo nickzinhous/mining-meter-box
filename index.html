@@ -10,7 +10,23 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=3" />
+    <style>
+      .login-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: grid;
+        place-items: center;
+        background: #0f1115;
+      }
+      html.has-session .login-screen {
+        display: none !important;
+      }
+      html:not(.has-session) .app {
+        display: none !important;
+      }
+    </style>
     <script>
       try {
         var session = JSON.parse(localStorage.getItem("mmb-session") || "null");
@@ -272,6 +288,6 @@
       </div>
     </main>
     <div id="probe-tip" class="probe-tip" hidden></div>
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
   </body>
 </html>
