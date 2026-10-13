@@ -3,14 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Caixa de testemunhos</title>
+    <title>Pandora</title>
+    <link rel="icon" href="favicon.svg?v=2" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="styles.css?v=11" />
     <style>
       .login-screen {
         position: fixed;
@@ -40,11 +41,8 @@
     <section id="login-screen" class="login-screen" aria-labelledby="login-title">
       <form id="login-form" class="login-card">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <div>
-            <p class="brand-kicker">Sondagem mineral</p>
-            <h1>Caixa de testemunhos</h1>
-          </div>
+          <img class="brand-logo" src="favicon.svg?v=2" alt="" width="28" height="28" />
+          <h1>Pandora</h1>
         </div>
         <h2 id="login-title">Entrar</h2>
         <p id="login-lead" class="login-lead">Informe o usuário e a senha para abrir a caixa.</p>
@@ -70,7 +68,6 @@
         </label>
         <p id="login-error" class="form-error" hidden></p>
         <button id="login-submit" type="submit" class="btn">Entrar</button>
-        <button id="login-toggle" type="button" class="btn-text">Criar acesso</button>
         <p class="login-note">O acesso fica salvo apenas neste navegador.</p>
       </form>
     </section>
@@ -78,19 +75,18 @@
     <main class="app">
       <header class="header">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <div>
-            <p class="brand-kicker">Sondagem mineral</p>
-            <h1>Caixa de testemunhos</h1>
-          </div>
+          <img class="brand-logo" src="favicon.svg?v=2" alt="" width="28" height="28" />
+          <h1>Pandora</h1>
+          <button type="button" class="btn-help" aria-label="Ajuda sobre a caixa">
+            ?
+            <span class="help-tip" role="tooltip">
+              O taquinho marca o fim da recuperação. O avanço guarda a profundidade
+              perfurada. O testemunho entra pelo topo da canaleta. Cada caixa tem
+              três canaletas de 1&nbsp;m.
+            </span>
+          </button>
         </div>
-        <div class="header-side">
-          <p class="subtitle">
-            O taquinho marca o fim da recuperação. O avanço guarda a profundidade
-            perfurada. O testemunho entra pela base da canaleta. Cada caixa tem
-            três canaletas de 1&nbsp;m.
-          </p>
-          <div class="session">
+        <div class="session">
             <label class="hole-field">
               <span>Furo</span>
               <input id="hole-id" type="text" maxlength="32" placeholder="F-001" autocomplete="off" />
@@ -122,7 +118,6 @@
             </div>
             <span id="current-user" class="current-user"></span>
             <button type="button" id="logout-btn" class="btn-logout">Sair</button>
-          </div>
         </div>
       </header>
 
@@ -269,7 +264,7 @@
             >
               <title id="tray-title">Caixa com três canaletas</title>
               <desc id="tray-desc">
-                Vista superior. O testemunho entra pela base de cada canaleta e sobe.
+                Vista superior. O testemunho entra pelo topo de cada canaleta e desce.
               </desc>
             <defs></defs>
               <g id="tray-root"></g>
@@ -277,17 +272,16 @@
               <g id="taquinhos-root"></g>
               <g id="marks-root"></g>
               <g id="probe-root"></g>
-              <g id="tag-leaders"></g>
             </svg>
             <div id="tag-layer" class="tag-layer"></div>
             </div>
 
-            <p class="scale scale--width">O zero fica na base. Passe o mouse no testemunho para ver a profundidade. Aproxime com + e −, ou com a roda do mouse.</p>
+            <p class="scale scale--width">O zero fica no topo. Passe o mouse no testemunho para ver a profundidade. Aproxime com + e −, ou com a roda do mouse.</p>
           </div>
         </section>
       </div>
     </main>
     <div id="probe-tip" class="probe-tip" hidden></div>
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=12"></script>
   </body>
 </html>

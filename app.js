@@ -48,8 +48,6 @@ const layout = {
   boxes: /** @type {{ ox: number, y0: number, channelX: number[] }[]} */ ([]),
 };
 
-/** @type {{ id: string, box: number, boxLeft: number, boxRight: number, y0: number, anchorX: number, anchorY: number, lines: string[] }[]} */
-let tagAnchors = [];
 let freshId = null;
 /** @type {null | Record<string, any>} */
 let probePin = null;
@@ -182,19 +180,36 @@ function findIntervalAtRecovery(intervals, recoveryMm) {
 function accumulateIntervals(items) {
   let advanceMm = 0;
   let recoveryMm = 0;
+  let occupiedMm = 0;
   return items.map((item, index) => {
+    const recuperacaoInicialMm = recoveryMm;
+    const recuperacaoFinalMm = recoveryMm + item.recuperacaoMm;
     const placed = {
       ...item,
       index,
       profundidadeInicialMm: advanceMm,
       profundidadeFinalMm: advanceMm + item.avancoMm,
-      recuperacaoInicialMm: recoveryMm,
-      recuperacaoFinalMm: recoveryMm + item.recuperacaoMm,
+      recuperacaoInicialMm,
+      recuperacaoFinalMm,
+      physicalInicialMm: occupiedMm,
+      physicalFinalMm: occupiedMm,
     };
+    if (item.recuperacaoMm > 0) {
+      const materialEnd = occupiedMm + item.recuperacaoMm;
+      const block = placement(materialEnd);
+      placed.physicalInicialMm = occupiedMm;
+      placed.physicalFinalMm = materialEnd;
+      occupiedMm = block.shifted ? block.topEnd * MM : materialEnd;
+    }
     advanceMm = placed.profundidadeFinalMm;
-    recoveryMm = placed.recuperacaoFinalMm;
+    recoveryMm = recuperacaoFinalMm;
     return placed;
   });
+}
+
+function intervalBlock(interval) {
+  if (!interval || interval.recuperacaoMm <= 0) return null;
+  return placement(interval.physicalFinalMm);
 }
 
 function recoverySegments(startMm, endMm) {
@@ -260,7 +275,7 @@ function boxCount() {
   let maxBox = 0;
   for (const interval of currentIntervals()) {
     if (interval.recuperacaoMm <= 0) continue;
-    maxBox = Math.max(maxBox, placement(interval.recuperacaoFinalMm).box);
+    maxBox = Math.max(maxBox, intervalBlock(interval).box);
   }
   return maxBox + 1;
 }
@@ -273,9 +288,9 @@ function xu(cm) {
   return cm;
 }
 
-/** A canaleta enche da base para o topo: 0 cm fica embaixo. */
+/** 0 cm fica no topo da canaleta; a posição cresce para baixo. */
 function yFromBase(y0, cmFromBase) {
-  return y0 + LENGTH - cmFromBase;
+  return y0 + cmFromBase;
 }
 
 function normalizeHex(value) {
@@ -425,16 +440,6 @@ function drawBox(parent, boxIndex) {
   );
   shell.appendChild(
     el("rect", {
-      x: ox,
-      y: PAD_T,
-      width: xu(totalW),
-      height: LABEL_BAND - 0.15,
-      rx: 0.45,
-      fill: "var(--box-edge)",
-    }),
-  );
-  shell.appendChild(
-    el("rect", {
       x: ox + 0.28,
       y: PAD_T + 0.28,
       width: xu(totalW) - 0.56,
@@ -447,16 +452,41 @@ function drawBox(parent, boxIndex) {
     }),
   );
 
+  const head = el("g", { class: "box-head" });
+  head.appendChild(
+    el("rect", {
+      x: ox + 0.55,
+      y: PAD_T + 0.42,
+      width: xu(totalW) - 1.1,
+      height: LABEL_BAND - 0.95,
+      rx: 0.22,
+      fill: "color-mix(in srgb, var(--box-ink) 7%, transparent)",
+    }),
+  );
+  head.appendChild(
+    el("line", {
+      class: "box-head-rule",
+      x1: ox + 0.7,
+      y1: y0 - 0.08,
+      x2: ox + xu(totalW) - 0.7,
+      y2: y0 - 0.08,
+      stroke: "color-mix(in srgb, var(--box-ink) 28%, transparent)",
+      "stroke-width": 1,
+      "vector-effect": "non-scaling-stroke",
+    }),
+  );
   const title = el("text", {
-    x: ox + 0.55,
-    y: PAD_T + 1.55,
+    class: "box-head-title",
+    x: ox + xu(totalW) / 2,
+    y: PAD_T + 1.48,
+    "text-anchor": "middle",
     fill: "var(--box-ink)",
-    "font-size": 1.15,
+    "font-size": 1.28,
     "font-weight": "700",
-    "font-family": "Inter, Segoe UI, system-ui, sans-serif",
   });
-  title.textContent = `Caixa ${boxIndex + 1}`;
-  shell.appendChild(title);
+  title.textContent = `CAIXA ${String(boxIndex + 1).padStart(2, "0")}`;
+  head.appendChild(title);
+  shell.appendChild(head);
 
   let x = ox + xu(WALL_W);
 
@@ -482,14 +512,23 @@ function drawBox(parent, boxIndex) {
 
     const slotStart = (boxIndex * CHANNELS + i) * LENGTH;
     const range = el("text", {
+      class: "box-head-range",
       x: x + xu(CHANNEL_W) / 2,
-      y: PAD_T + 3.35,
+      y: PAD_T + 3.42,
       "text-anchor": "middle",
       fill: "var(--box-ink)",
-      "font-size": 0.78,
-      "font-family": "Inter, Segoe UI, system-ui, sans-serif",
+      "font-size": 1.08,
+      "font-weight": "650",
     });
-    range.textContent = `${i + 1} · ${slotStart}–${slotStart + LENGTH}`;
+    const indexMark = el("tspan", {
+      class: "box-head-index",
+      fill: "var(--accent)",
+      "font-weight": "700",
+    });
+    indexMark.textContent = String(i + 1).padStart(2, "0");
+    const intervalMark = el("tspan");
+    intervalMark.textContent = `  ${slotStart}–${slotStart + LENGTH}`;
+    range.append(indexMark, intervalMark);
     shell.appendChild(range);
 
     x += xu(CHANNEL_W);
@@ -518,6 +557,18 @@ function drawBox(parent, boxIndex) {
           "vector-effect": "non-scaling-stroke",
         }),
       );
+      head.appendChild(
+        el("line", {
+          class: "box-head-split",
+          x1: x + xu(DIVIDER_W) / 2,
+          y1: PAD_T + 2.05,
+          x2: x + xu(DIVIDER_W) / 2,
+          y2: y0 - 0.42,
+          stroke: "color-mix(in srgb, var(--box-ink) 22%, transparent)",
+          "stroke-width": 1,
+          "vector-effect": "non-scaling-stroke",
+        }),
+      );
       x += xu(DIVIDER_W);
     }
   }
@@ -526,6 +577,11 @@ function drawBox(parent, boxIndex) {
   addSideCmTicks(shell, ox + xu(totalW), y0, 1);
 
   parent.appendChild(shell);
+  shell.querySelectorAll(".box-head-range").forEach((node) => {
+    const width = node.getBBox().width;
+    const maxW = CHANNEL_W - 0.45;
+    if (width > maxW) node.setAttribute("font-size", String((1.08 * maxW) / width));
+  });
   layout.boxes[boxIndex] = { ox, y0, channelX };
 }
 
@@ -550,7 +606,7 @@ function renderCores(intervals) {
   intervals.forEach((interval) => {
     if (interval.recuperacaoMm <= 0) return;
     const fill = normalizeHex(interval.color);
-    for (const seg of recoverySegments(interval.recuperacaoInicialMm, interval.recuperacaoFinalMm)) {
+    for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
       const box = layout.boxes[seg.box];
       if (!box) continue;
       const x = box.channelX[seg.channel];
@@ -558,7 +614,7 @@ function renderCores(intervals) {
       const height = seg.lengthMm / MM;
       if (height <= 0) continue;
       const inset = 0.16;
-      const y = yFromBase(box.y0, seg.localEndMm / MM);
+      const y = yFromBase(box.y0, seg.localStartMm / MM);
       const absStart = seg.channelIndex * LENGTH * MM + seg.localStartMm;
       const absEnd = seg.channelIndex * LENGTH * MM + seg.localEndMm;
       root.appendChild(
@@ -577,7 +633,6 @@ function renderCores(intervals) {
           height,
           rx: 0.05,
           fill,
-          opacity: 0.92,
         }),
       );
       root.appendChild(
@@ -601,13 +656,12 @@ function renderTaquinhos(intervals) {
   const root = document.getElementById("taquinhos-root");
   if (!root) return;
   root.replaceChildren();
-  tagAnchors = [];
 
   const yBoxes = layout.boxes;
 
   for (const t of intervals) {
     if (t.recuperacaoMm <= 0) continue;
-    const place = placement(t.recuperacaoFinalMm);
+    const place = intervalBlock(t);
     const box = yBoxes[place.box];
     if (!box) continue;
     const left = box.channelX[place.channel];
@@ -615,21 +669,27 @@ function renderTaquinhos(intervals) {
     const cx = left;
     const localTop = place.topStart - place.slotStart;
     const localBody = place.bodyStart - place.slotStart;
-    const topY = yFromBase(box.y0, localTop + TOP_LEN);
-    const bodyY = yFromBase(box.y0, localBody + BODY_LEN);
+    const topY = yFromBase(box.y0, localTop);
+    const bodyY = yFromBase(box.y0, localBody);
     const lines = [
       `A: ${formatMeters(t.avancoMm)}`,
       `R: ${formatMeters(t.recuperacaoMm)}`,
       `P: ${depthSpan(t)}`,
     ];
 
-    const g = el("g", { class: "taquinho", "data-id": t.id, "pointer-events": "none" });
+    const g = el("g", {
+      class: "taquinho",
+      "data-id": t.id,
+      "data-label": lines.join("|"),
+      "pointer-events": "none",
+    });
     const title = el("title");
     title.textContent = `Avanço ${lines[0].slice(3)}. Recuperação ${lines[1].slice(3)}. Profundidade ${lines[2].slice(3)}.`;
     g.appendChild(title);
 
     g.appendChild(
       el("rect", {
+        class: "taquinho-block",
         x: cx,
         y: topY,
         width: xu(CHANNEL_W),
@@ -653,32 +713,10 @@ function renderTaquinhos(intervals) {
       }),
     );
 
-    g.appendChild(
-      el("line", {
-        x1: cx + 0.2,
-        y1: topY + TOP_LEN / 2,
-        x2: cx + xu(CHANNEL_W) - 0.2,
-        y2: topY + TOP_LEN / 2,
-        stroke: "var(--taquinho-ink)",
-        "stroke-width": 1.2,
-        "vector-effect": "non-scaling-stroke",
-      }),
-    );
-
     root.appendChild(g);
-    tagAnchors.push({
-      id: t.id,
-      box: place.box,
-      boxLeft: box.ox,
-      boxRight: box.ox + totalW,
-      y0: box.y0,
-      anchorX: cx + xu(CHANNEL_W),
-      anchorY: topY + TOP_LEN / 2,
-      lines,
-    });
   }
 
-  layoutCoreTags();
+  layoutTaquinhoFaces();
 }
 
 function truncate(s, max) {
@@ -706,12 +744,12 @@ function renderList(intervals) {
     li.style.borderLeftColor = color;
     const hasCore = t.recuperacaoMm > 0;
     if (!hasCore) li.classList.add("is-empty-recovery");
-    const place = hasCore ? placement(t.recuperacaoFinalMm) : null;
+    const place = intervalBlock(t);
     const where = place
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
       : "Sem testemunho na caixa";
     const depth = depthSpan(t);
-    const recovered = `${formatMeters(t.recuperacaoInicialMm).replace(" m", "")}–${formatMeters(t.recuperacaoFinalMm)}`;
+    const recovered = `${metersLabel(t.physicalInicialMm)}–${formatMeters(t.physicalFinalMm)}`;
     li.innerHTML = `
       <div class="card-body">
         <div class="card-head">
@@ -982,7 +1020,7 @@ function bindLocate() {
     }
 
     const tapeUm = tapeUmFromDepth(interval, parsed.mm);
-    const physicalUm = interval.recuperacaoInicialMm * 1000 + tapeUm;
+    const physicalUm = interval.physicalInicialMm * 1000 + tapeUm;
     consulta = {
       depthUm: parsed.mm * 1000,
       tapeUm,
@@ -1045,7 +1083,7 @@ function bindInverse() {
     }
 
     const depthUm = depthUmFromTape(interval, tapeUm);
-    const physicalUm = interval.recuperacaoInicialMm * 1000 + tapeUm;
+    const physicalUm = interval.physicalInicialMm * 1000 + tapeUm;
     consulta = {
       depthUm,
       tapeUm,
@@ -1092,7 +1130,7 @@ function applyCamera() {
   svg.classList.toggle("is-zoomed", camera.zoom > 1);
   const label = document.getElementById("zoom-label");
   if (label) label.textContent = `${Math.round(camera.zoom * 100)}%`;
-  layoutCoreTags();
+  layoutTaquinhoFaces();
 }
 
 function svgPoint(event) {
@@ -1344,7 +1382,7 @@ function showApp(username) {
   if (app) app.hidden = false;
   const node = document.getElementById("current-user");
   if (node) node.textContent = username;
-  requestAnimationFrame(() => layoutCoreTags());
+  requestAnimationFrame(() => layoutTaquinhoFaces());
 }
 
 function showLoginScreen() {
@@ -1389,11 +1427,30 @@ function validUsername(name) {
   return /^[\p{L}\p{N}][\p{L}\p{N}._ -]*$/u.test(text);
 }
 
+function isLocalTestHost() {
+  const host = location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+async function ensureLocalTestUser() {
+  if (!isLocalTestHost()) return;
+  const users = loadUsers();
+  const hash = await sha256Hex("1234");
+  const existing = users.find((user) => user.key === "admin");
+  if (existing?.hash === hash && existing.username === "admin") return;
+  if (existing) {
+    existing.username = "admin";
+    existing.hash = hash;
+  } else {
+    users.push({ key: "admin", username: "admin", hash });
+  }
+  localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
+}
+
+const localTestUserReady = ensureLocalTestUser();
+
 function bindAuth() {
   const form = document.getElementById("login-form");
-  document.getElementById("login-toggle")?.addEventListener("click", () => {
-    setAuthMode(authMode === "login" ? "register" : "login");
-  });
   document.getElementById("logout-btn")?.addEventListener("click", () => {
     localStorage.removeItem(AUTH_SESSION_KEY);
     const formLogin = document.getElementById("login-form");
@@ -1417,19 +1474,13 @@ function bindAuth() {
       return;
     }
 
+    await localTestUserReady;
     const users = loadUsers();
     const key = username.toLocaleLowerCase("pt-BR");
     const hash = await sha256Hex(password);
     const existing = users.find((user) => user.key === key);
 
-    if (authMode === "register") {
-      if (existing) {
-        showLoginError("Já existe um acesso com esse usuário.");
-        return;
-      }
-      users.push({ key, username, hash });
-      localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
-    } else if (!existing || existing.hash !== hash) {
+    if (!existing || existing.hash !== hash) {
       showLoginError("Usuário ou senha incorretos.");
       return;
     }
@@ -1441,84 +1492,77 @@ function bindAuth() {
   });
 }
 
-function layoutCoreTags() {
-  const layer = document.getElementById("tag-layer");
-  const svg = document.getElementById("tray-svg");
-  const leaders = document.getElementById("tag-leaders");
-  if (!layer || !svg) return;
-  layer.replaceChildren();
-  if (leaders) leaders.replaceChildren();
-  const ctm = svg.getScreenCTM();
-  if (!ctm || tagAnchors.length === 0) return;
-  const wrap = layer.getBoundingClientRect();
-  if (wrap.width < 8 || wrap.height < 8) return;
-  const vb = svg.viewBox.baseVal;
-  const scale = svg.getBoundingClientRect().height / vb.height;
-  if (!Number.isFinite(scale) || scale <= 0.2) return;
+function labelValue(line) {
+  return line.replace(/^[ARP]:\s*/, "").replace(/\s*m$/, "");
+}
 
-  const tagPx = 62;
-  const tagSvg = tagPx / scale;
-  const groups = new Map();
-  for (const anchor of tagAnchors) {
-    const list = groups.get(anchor.box) || [];
-    list.push(anchor);
-    groups.set(anchor.box, list);
-  }
-  for (const anchors of groups.values()) {
-    anchors.sort((a, b) => a.anchorY - b.anchorY);
-    let cursor = -Infinity;
-    for (const anchor of anchors) {
-      const min = anchor.y0;
-      const max = Math.max(min, anchor.y0 + LENGTH - tagSvg);
-      let top = anchor.anchorY - tagSvg / 2;
-      if (top < cursor) top = cursor;
-      anchor.tagY = Math.min(Math.max(top, min), max);
-      cursor = anchor.tagY + tagSvg + 6 / scale;
+function labelCandidates(lines) {
+  const short = (line) => line.replace(/\s*m$/, "");
+  const tight = (line) => labelValue(line).replace(/,00/g, "");
+  const a = tight(lines[0]);
+  const r = tight(lines[1]);
+  const p = tight(lines[2]);
+  return [
+    lines,
+    lines.map(short),
+    [short(lines[0]), short(lines[1]), `P: ${p}`],
+    [`A ${a}`, `R ${r}`, `P ${p}`],
+    [`A ${a}  R ${r}`, `P ${p}`],
+    [`A${a} R${r} P${p}`],
+    [`A${a}·R${r}·P${p}`],
+    [`P${p}`],
+    [p],
+  ];
+}
+
+function paintTaquinhoFace(face, lines) {
+  const write = (texts, fontPx) => {
+    face.style.fontSize = `${fontPx}px`;
+    face.replaceChildren();
+    for (const text of texts) {
+      const span = document.createElement("span");
+      span.textContent = text;
+      face.appendChild(span);
     }
-  }
-
-  const toClient = (x, y) => {
-    const point = svg.createSVGPoint();
-    point.x = x;
-    point.y = y;
-    return point.matrixTransform(ctm);
+    return face.scrollWidth <= face.clientWidth + 1 && face.scrollHeight <= face.clientHeight + 1;
   };
 
-  tagAnchors.forEach((anchor, index) => {
-    const tag = document.createElement("div");
-    tag.className = "core-tag";
-    tag.dataset.id = anchor.id;
-    tag.style.zIndex = String(2 + index);
-    for (const line of anchor.lines) {
-      const span = document.createElement("span");
-      span.textContent = line;
-      tag.appendChild(span);
+  for (const texts of labelCandidates(lines)) {
+    const linesFit = Math.max(1, texts.length);
+    let font = Math.min(13, Math.floor((face.clientHeight - 2) / (linesFit * 1.08)));
+    while (font >= 9) {
+      if (write(texts, font)) return;
+      font -= 1;
     }
-    tag.title = anchor.lines.join("\n");
-    layer.appendChild(tag);
-    const width = tag.offsetWidth || 148;
-    const height = tag.offsetHeight || tagPx;
-    const origin = toClient(anchor.boxRight + 0.45, anchor.tagY);
-    let left = origin.x - wrap.left;
-    let top = origin.y - wrap.top;
-    left = Math.min(Math.max(4, left), Math.max(4, wrap.width - width - 4));
-    top = Math.min(Math.max(4, top), Math.max(4, wrap.height - height - 4));
-    tag.style.left = `${left}px`;
-    tag.style.top = `${top}px`;
+  }
+  face.replaceChildren();
+}
 
-    if (!leaders) return;
-    leaders.appendChild(
-      el("path", {
-        d: `M ${anchor.anchorX} ${anchor.anchorY} H ${anchor.boxRight} V ${anchor.tagY + tagSvg / 2}`,
-        fill: "none",
-        stroke: "var(--taquinho)",
-        "stroke-width": 1.25,
-        "vector-effect": "non-scaling-stroke",
-        "stroke-linejoin": "round",
-        opacity: 0.9,
-        "pointer-events": "none",
-      }),
-    );
+function layoutTaquinhoFaces() {
+  const layer = document.getElementById("tag-layer");
+  const svg = document.getElementById("tray-svg");
+  if (!layer || !svg) return;
+  layer.replaceChildren();
+  const wrap = layer.getBoundingClientRect();
+  if (wrap.width < 8 || wrap.height < 8) return;
+
+  document.querySelectorAll("#taquinhos-root .taquinho").forEach((node) => {
+    const block = node.querySelector(".taquinho-block");
+    if (!block) return;
+    const box = block.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2) return;
+    const lines = (node.getAttribute("data-label") || "").split("|").filter(Boolean);
+    if (lines.length === 0) return;
+    const face = document.createElement("div");
+    face.className = "taquinho-face";
+    face.dataset.id = node.getAttribute("data-id") || "";
+    face.title = lines.join("\n");
+    face.style.left = `${box.left - wrap.left}px`;
+    face.style.top = `${box.top - wrap.top}px`;
+    face.style.width = `${box.width}px`;
+    face.style.height = `${box.height}px`;
+    layer.appendChild(face);
+    paintTaquinhoFace(face, lines);
   });
 }
 
@@ -1584,9 +1628,9 @@ function readingFromPointer(core, point) {
   if (!box) return null;
   const startMm = Number(core.getAttribute("data-abs-start-mm"));
   const endMm = Number(core.getAttribute("data-abs-end-mm"));
-  const localCm = Math.min(LENGTH, Math.max(0, box.y0 + LENGTH - point.y));
+  const localCm = Math.min(LENGTH, Math.max(0, point.y - box.y0));
   const absMm = Math.min(endMm, Math.max(startMm, channelIndex * LENGTH * MM + localCm * MM));
-  const offsetMm = Math.round(absMm - interval.recuperacaoInicialMm);
+  const offsetMm = Math.round(absMm - interval.physicalInicialMm);
   const depthUm = estimateDepthUm(interval, offsetMm);
   if (depthUm == null) return null;
   const place = physicalPlace(Math.round(absMm * 1000));
@@ -1667,7 +1711,7 @@ function showTagTip(interval, clientX, clientY) {
   if (!tip || probePin) return;
   tip.replaceChildren();
   const dl = document.createElement("dl");
-  const place = interval.recuperacaoMm > 0 ? placement(interval.recuperacaoFinalMm) : null;
+  const place = intervalBlock(interval);
   tipRow(dl, "A · Avanço", formatMeters(interval.avancoMm));
   tipRow(dl, "R · Recuperação", formatMeters(interval.recuperacaoMm));
   tipRow(dl, "P · Profundidade", depthSpan(interval));
@@ -1703,10 +1747,8 @@ function bindProbe() {
   svg.addEventListener("pointerdown", (event) => {
     const core = event.target instanceof Element ? event.target.closest(".core") : null;
     if (!core) {
-      if (probePin) {
-        probePin = null;
-        clearHover();
-      }
+      probePin = null;
+      clearHover();
       return;
     }
     const reading = readingFromPointer(core, svgPoint(event));
@@ -1717,22 +1759,24 @@ function bindProbe() {
     setActiveInterval(reading.id);
   });
 
-  const showTag = (event) => {
+  const showFace = (event) => {
+    const tag = event.target instanceof Element ? event.target.closest(".taquinho-face") : null;
+    if (!tag) return null;
+    return currentIntervals().find((item) => item.id === tag.dataset.id) || null;
+  };
+  layer?.addEventListener("pointermove", (event) => {
     if (probePin || event.pointerType === "touch") return;
-    const tag = event.target instanceof Element ? event.target.closest(".core-tag") : null;
-    if (!tag) return;
-    const interval = currentIntervals().find((item) => item.id === tag.dataset.id);
+    const interval = showFace(event);
     if (!interval) return;
     clearProbeDrawing();
     showTagTip(interval, event.clientX, event.clientY);
     setActiveInterval(interval.id);
-  };
-  layer?.addEventListener("pointermove", showTag);
+  });
   layer?.addEventListener("pointerdown", (event) => {
-    const tag = event.target instanceof Element ? event.target.closest(".core-tag") : null;
-    if (!tag) return;
-    const interval = currentIntervals().find((item) => item.id === tag.dataset.id);
+    const interval = showFace(event);
     if (!interval) return;
+    probePin = null;
+    clearProbeDrawing();
     showTagTip(interval, event.clientX, event.clientY);
     setActiveInterval(interval.id);
   });
@@ -1740,7 +1784,7 @@ function bindProbe() {
     if (!probePin) clearHover();
   });
 
-  window.addEventListener("resize", () => layoutCoreTags());
+  window.addEventListener("resize", () => layoutTaquinhoFaces());
 }
 
 const THEME_KEY = "mmb-theme";

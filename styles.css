@@ -60,25 +60,18 @@ select {
 .app {
   height: 100%;
   margin: 0;
-  padding: 0.9rem 1rem 0.85rem;
+  padding: 0.45rem 0.85rem 0.7rem;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 0.45rem;
 }
 
 .header {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
-}
-
-.header-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.45rem;
-  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
 }
 
 .session {
@@ -86,7 +79,8 @@ select {
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  margin-left: auto;
 }
 
 .current-user {
@@ -121,43 +115,73 @@ select {
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   min-width: 0;
 }
 
-.brand-mark {
-  width: 0.42rem;
-  height: 2.35rem;
-  border-radius: 999px;
-  background: linear-gradient(#e0f2fe, var(--accent) 45%, var(--accent-deep));
-  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.12);
+.brand-logo {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: block;
   flex-shrink: 0;
 }
 
-.brand-kicker {
-  margin: 0;
-  color: var(--accent);
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
 .header h1 {
-  margin: 0.08rem 0 0;
-  font-size: 1.35rem;
+  margin: 0;
+  font-size: 1.12rem;
   font-weight: 650;
   letter-spacing: -0.03em;
   line-height: 1.1;
 }
 
-.subtitle {
-  max-width: 34rem;
-  margin: 0;
-  font-size: 0.84rem;
+.btn-help {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  flex-shrink: 0;
   color: var(--muted);
-  line-height: 1.5;
-  text-align: right;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.btn-help:hover,
+.btn-help:focus-visible {
+  color: var(--text);
+  border-color: rgba(56, 189, 248, 0.55);
+  outline: none;
+}
+
+.help-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 30;
+  width: min(18rem, 70vw);
+  padding: 0.55rem 0.65rem;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.btn-help:hover .help-tip,
+.btn-help:focus-visible .help-tip {
+  display: block;
 }
 
 .layout {
@@ -655,6 +679,19 @@ select {
   color: var(--muted);
 }
 
+.box-head-title,
+.box-head-range {
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+}
+
+.box-head-title {
+  letter-spacing: 0.12em;
+}
+
+.box-head-range {
+  letter-spacing: 0.01em;
+}
+
 .tray-svg {
   width: 100%;
   height: 100%;
@@ -729,8 +766,8 @@ html:not(.has-session) .app {
 }
 
 .login-card h1 {
-  margin: 0.08rem 0 0;
-  font-size: 1.35rem;
+  margin: 0;
+  font-size: 1.2rem;
   font-weight: 650;
   letter-spacing: -0.03em;
   line-height: 1.1;
@@ -977,37 +1014,39 @@ html:not(.has-session) .app {
   pointer-events: none;
 }
 
-.core-tag {
+.taquinho-face {
   position: absolute;
   display: flex;
   flex-direction: column;
-  min-width: 7.4rem;
-  padding: 0.28rem 0.42rem 0.32rem;
-  color: var(--text);
-  font-size: 0.72rem;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 1px 2px;
+  overflow: hidden;
+  color: var(--taquinho-ink);
   font-weight: 700;
-  line-height: 1.35;
-  letter-spacing: 0;
-  background: color-mix(in srgb, var(--tag-bg) 92%, transparent);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--taquinho);
-  border-radius: 7px;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-align: center;
   pointer-events: auto;
   user-select: none;
+  cursor: help;
 }
 
-.core-tag.is-hot {
-  border-color: var(--accent);
+.taquinho-face span {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .core {
   cursor: crosshair;
+  opacity: 0.82;
 }
 
 .core.is-hot {
   stroke: none;
-  opacity: 1;
+  opacity: 0.9;
   filter: brightness(1.08);
 }
 
@@ -1075,20 +1114,14 @@ html:not(.has-session) .app {
       max(0.75rem, env(safe-area-inset-left));
   }
 
-  .header,
-  .header-side {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.45rem;
-  }
-
-  .subtitle {
-    max-width: none;
-    text-align: left;
+  .header {
+    align-items: stretch;
+    gap: 0.35rem;
   }
 
   .session {
     justify-content: flex-start;
+    margin-left: 0;
   }
 
   .theme-panel {
@@ -1134,6 +1167,11 @@ html:not(.has-session) .app {
 @media (max-width: 420px) {
   .header h1 {
     font-size: 1.15rem;
+  }
+
+  .brand-logo {
+    width: 1.5rem;
+    height: 1.5rem;
   }
 
   .workspace {

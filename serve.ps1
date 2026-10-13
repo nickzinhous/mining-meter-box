@@ -13,6 +13,7 @@ $mime = @{
   ".js"   = "application/javascript"
   ".json" = "application/json"
   ".ico"  = "image/x-icon"
+  ".svg"  = "image/svg+xml"
 }
 
 try {
