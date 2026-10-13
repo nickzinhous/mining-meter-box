@@ -11,8 +11,54 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      try {
+        var session = JSON.parse(localStorage.getItem("mmb-session") || "null");
+        if (session && typeof session.username === "string" && session.username.trim()) {
+          document.documentElement.classList.add("has-session");
+        }
+      } catch (error) {}
+    </script>
   </head>
   <body>
+    <section id="login-screen" class="login-screen" aria-labelledby="login-title">
+      <form id="login-form" class="login-card">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <p class="brand-kicker">Sondagem mineral</p>
+            <h1>Caixa de testemunhos</h1>
+          </div>
+        </div>
+        <h2 id="login-title">Entrar</h2>
+        <p id="login-lead" class="login-lead">Informe o usuário e a senha para abrir a caixa.</p>
+        <label class="field">
+          <span>Usuário</span>
+          <input
+            name="usuario"
+            type="text"
+            autocomplete="username"
+            maxlength="40"
+            required
+          />
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input
+            name="senha"
+            type="password"
+            autocomplete="current-password"
+            maxlength="72"
+            required
+          />
+        </label>
+        <p id="login-error" class="form-error" hidden></p>
+        <button id="login-submit" type="submit" class="btn">Entrar</button>
+        <button id="login-toggle" type="button" class="btn-text">Criar acesso</button>
+        <p class="login-note">O acesso fica salvo apenas neste navegador.</p>
+      </form>
+    </section>
+
     <main class="app">
       <header class="header">
         <div class="brand">
@@ -22,10 +68,46 @@
             <h1>Caixa de testemunhos</h1>
           </div>
         </div>
-        <p class="subtitle">
-          O taquinho marca o fim da recuperação. O avanço guarda a profundidade
-          perfurada. Cada caixa tem três canaletas de 1&nbsp;m.
-        </p>
+        <div class="header-side">
+          <p class="subtitle">
+            O taquinho marca o fim da recuperação. O avanço guarda a profundidade
+            perfurada. O testemunho entra pela base da canaleta. Cada caixa tem
+            três canaletas de 1&nbsp;m.
+          </p>
+          <div class="session">
+            <label class="hole-field">
+              <span>Furo</span>
+              <input id="hole-id" type="text" maxlength="32" placeholder="F-001" autocomplete="off" />
+            </label>
+            <div class="appearance">
+              <button type="button" id="theme-open" class="btn-logout" aria-expanded="false" aria-controls="theme-panel">
+                Aparência
+              </button>
+              <div id="theme-panel" class="theme-panel" hidden>
+                <p class="theme-kicker">Cores do sistema</p>
+                <div id="theme-preview" class="theme-preview" aria-hidden="true">
+                  <div class="mini-box">
+                    <div class="mini-channel"></div>
+                    <span class="mini-tag">A R P</span>
+                  </div>
+                  <span class="mini-text">Texto</span>
+                </div>
+                <div id="palette-list" class="palette-list"></div>
+                <div id="theme-fields" class="theme-fields"></div>
+                <p id="theme-contrast" class="form-note" hidden></p>
+                <div class="theme-actions">
+                  <button type="button" id="theme-apply" class="btn">Aplicar</button>
+                  <button type="button" id="theme-reset" class="btn-logout">Restaurar padrão</button>
+                </div>
+                <p class="theme-footnote">
+                  A cor de cada testemunho continua a escolhida no cadastro. Estas preferências não alteram os intervalos.
+                </p>
+              </div>
+            </div>
+            <span id="current-user" class="current-user"></span>
+            <button type="button" id="logout-btn" class="btn-logout">Sair</button>
+          </div>
+        </div>
       </header>
 
       <div class="layout">
@@ -70,6 +152,16 @@
                 maxlength="80"
               />
             </label>
+            <div class="field field--full">
+              <span id="color-label">Cor do material · <span id="color-current" class="color-current">Marrom</span></span>
+              <div class="palette-row">
+                <div id="color-palette" class="palette" role="group" aria-labelledby="color-label"></div>
+                <label class="swatch-custom" title="Personalizada">
+                  <input id="color-custom" type="color" value="#8d5a32" aria-label="Escolher outra cor" />
+                </label>
+              </div>
+              <input type="hidden" name="cor" value="#8d5a32" />
+            </div>
             <button type="submit" class="btn">Adicionar taquinho</button>
           </form>
           <p id="form-error" class="form-error" hidden></p>
@@ -150,6 +242,7 @@
               <button type="button" id="zoom-reset">Ver tudo</button>
               <span id="zoom-label">100%</span>
             </div>
+            <div class="tray-stage">
             <svg
               id="tray-svg"
               class="tray-svg"
@@ -160,20 +253,25 @@
             >
               <title id="tray-title">Caixa com três canaletas</title>
               <desc id="tray-desc">
-                Vista superior com taquinhos de dois centímetros e meio.
+                Vista superior. O testemunho entra pela base de cada canaleta e sobe.
               </desc>
             <defs></defs>
               <g id="tray-root"></g>
               <g id="cores-root"></g>
               <g id="taquinhos-root"></g>
               <g id="marks-root"></g>
+              <g id="probe-root"></g>
+              <g id="tag-leaders"></g>
             </svg>
+            <div id="tag-layer" class="tag-layer"></div>
+            </div>
 
-            <p class="scale scale--width">Cada canaleta tem 7 cm. Aproxime com + e −, ou com a roda do mouse.</p>
+            <p class="scale scale--width">O zero fica na base. Passe o mouse no testemunho para ver a profundidade. Aproxime com + e −, ou com a roda do mouse.</p>
           </div>
         </section>
       </div>
     </main>
+    <div id="probe-tip" class="probe-tip" hidden></div>
     <script src="app.js"></script>
   </body>
 </html>
