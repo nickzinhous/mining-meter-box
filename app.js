@@ -1427,13 +1427,7 @@ function validUsername(name) {
   return /^[\p{L}\p{N}][\p{L}\p{N}._ -]*$/u.test(text);
 }
 
-function isLocalTestHost() {
-  const host = location.hostname;
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
 async function ensureLocalTestUser() {
-  if (!isLocalTestHost()) return;
   const users = loadUsers();
   const hash = await sha256Hex("1234");
   const existing = users.find((user) => user.key === "admin");
