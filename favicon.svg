@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Pandora">
-  <path fill="#46505c" stroke="#f2f5f8" stroke-width="1.2" stroke-linejoin="round" fill-rule="evenodd" d="M5 3.6h7.2c7.4 0 13 4 13 9.6s-5.6 9.4-13 9.4H11v5.8H5V3.6zm6 3.8h1.4c4.4 0 7.6 2.4 7.6 5.8s-3.2 5.6-7.6 5.6H11V7.4z"/>
-  <path fill="#f7f8fa" d="M6.35 8.3h3.15v16.1c0 .3-.25.5-.55.5h-2.05c-.3 0-.55-.2-.55-.5V8.3z"/>
-  <path fill="#e08a32" d="M6.2 5.2h3.45c.28 0 .5.22.5.5v1.9H5.7V5.7c0-.28.22-.5.5-.5z"/>
+  <path fill="#66717d" stroke="#d5dee8" stroke-width="0.6" stroke-linejoin="round" d="M2.9 15.2h11.8l3.7-4.2H6.5z"/>
+  <rect x="2.7" y="16.45" width="17.7" height="12.35" rx="1.35" fill="#4e5965" stroke="#d5dee8" stroke-width="0.6"/>
+  <path stroke="#e7eef5" stroke-width="0.6" stroke-linecap="round" opacity="0.32" d="M8.15 22.15v5.15M11.55 22.15v5.15M14.95 22.15v5.15"/>
+  <rect x="4.65" y="17.05" width="13.7" height="3.15" rx="0.4" fill="#171c22"/>
+  <rect x="5.7" y="16.7" width="2.55" height="3.85" rx="0.45" fill="#f7f8fa"/>
+  <rect x="5.82" y="16.55" width="2.3" height="0.78" rx="0.25" fill="#e08a32"/>
+  <path fill="#e08a32" d="M10.4 19.85c1.15-3.15 4.7-6.15 8.85-8.45 3.7-2.05 7.05-3.45 9.4-4.35l1.85 2.7c-2.55 1.05-6.05 2.6-9.6 4.6-4.05 2.25-6.55 4.45-6.9 5.5z"/>
+  <path stroke="#2c241c" stroke-width="0.7" stroke-linecap="round" opacity="0.42" d="M17.9 13.15l1.35 1.7M22.15 10.55l1.25 1.55"/>
 </svg>
