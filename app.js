@@ -788,9 +788,9 @@ function renderList(intervals) {
           <span class="chip">${where}</span>
         </div>
         <dl class="specs">
-          <div><dt>P · Profundidade</dt><dd>${depth}</dd></div>
-          <div><dt>A · Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
-          <div><dt>R · Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
+          <div><dt><span class="spec-k">P</span> · Profundidade</dt><dd>${depth}</dd></div>
+          <div><dt><span class="spec-k">A</span> · Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
+          <div><dt><span class="spec-k">R</span> · Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
           <div><dt>Na caixa</dt><dd>${hasCore ? recovered : "—"}</dd></div>
           <div><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
         </dl>
