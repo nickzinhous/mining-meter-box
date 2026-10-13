@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=18" />
+    <link rel="stylesheet" href="styles.css?v=31" />
     <style>
       .login-screen {
         position: fixed;
@@ -33,10 +33,13 @@
         if (session && typeof session.username === "string" && session.username.trim()) {
           document.documentElement.classList.add("has-session");
         }
+        if (sessionStorage.getItem("mmb-screen") === "work") {
+          document.documentElement.classList.add("resume-work");
+        }
       } catch (error) {}
     </script>
   </head>
-  <body>
+  <body class="is-home">
     <section id="login-screen" class="login-screen" aria-labelledby="login-title">
       <form id="login-form" class="login-card">
         <div class="brand">
@@ -85,18 +88,19 @@
           <button type="button" class="btn-help" aria-label="Ajuda sobre a caixa">
             ?
             <span class="help-tip" role="tooltip">
-              O taquinho marca o fim da recuperação. O avanço guarda a profundidade
-              perfurada. O testemunho entra pelo topo da canaleta. Cada caixa tem
-              três canaletas de 1&nbsp;m. Cada furo fica salvo neste navegador.
+              O taquinho marca o fim da recuperação. O avanço é a profundidade
+              perfurada. A recuperação é o comprimento que entra na caixa, da base
+              para cima. Cada caixa tem três canaletas de 1&nbsp;m. Cada furo fica
+              salvo neste navegador.
             </span>
           </button>
         </div>
         <div class="session">
+            <button type="button" id="home-open" class="btn-logout">Sondagens</button>
             <label class="hole-field">
               <span>Furo</span>
               <input id="hole-id" type="text" maxlength="32" placeholder="F-001" autocomplete="off" />
             </label>
-            <select id="hole-list" class="hole-list" aria-label="Furos salvos"></select>
             <div id="hole-menu" class="hole-menu">
               <button type="button" id="hole-menu-open" class="btn-logout" aria-expanded="false" aria-controls="log-actions">
                 Ações
@@ -106,14 +110,19 @@
                 <button type="button" id="undo-log" class="btn-quiet" disabled>Desfazer</button>
                 <button type="button" id="copy-report" class="btn-quiet" disabled>Copiar resumo</button>
                 <button type="button" id="download-hole" class="btn-quiet" disabled>Baixar furo</button>
-                <button type="button" id="download-table" class="btn-quiet" disabled>Baixar tabela</button>
+                <button type="button" id="download-table" class="btn-quiet" disabled title="CSV com separador ponto e vírgula, para abrir no Excel">Baixar tabela</button>
+                <button type="button" id="print-hole" class="btn-quiet">Imprimir caixas</button>
+                <button type="button" id="print-one" class="btn-quiet">Imprimir esta caixa</button>
+                <button type="button" id="print-sheet-btn" class="btn-quiet">Ficha da caixa</button>
+                <button type="button" id="print-report" class="btn-quiet">Relatório</button>
                 <button type="button" id="import-hole" class="btn-quiet">Abrir arquivo</button>
                 <button type="button" id="clear-hole" class="btn-quiet" disabled>Limpar furo</button>
+                <button type="button" id="hole-delete" class="btn-quiet">Excluir furo</button>
+                <button type="button" id="geo-toggle" class="btn-quiet" aria-pressed="false">Ativar descrição geológica</button>
+                <button type="button" id="shortcuts-open" class="btn-quiet">Atalhos</button>
                 <input id="hole-file" type="file" accept="application/json,.json" hidden />
               </div>
             </div>
-            <button type="button" id="hole-new" class="btn-logout">Novo</button>
-            <button type="button" id="hole-delete" class="btn-logout">Excluir</button>
             <div class="appearance">
               <button type="button" id="theme-open" class="btn-logout" aria-expanded="false" aria-controls="theme-panel">
                 Aparência
@@ -144,50 +153,78 @@
         </div>
       </header>
 
-      <div class="layout">
+      <section id="home" class="home" aria-labelledby="home-title">
+        <div class="home-sheet">
+          <div class="home-heading">
+            <div>
+              <p class="home-kicker">Registro de furos</p>
+              <h2 id="home-title">Sondagens</h2>
+              <p class="home-lead">Abra um furo para lançar os taquinhos, ou continue o que já está neste navegador.</p>
+            </div>
+            <p id="home-count" class="home-count" hidden></p>
+          </div>
+          <div class="home-tools">
+            <label class="home-search">
+              <span class="sr-only">Buscar sondagem</span>
+              <input id="home-search" type="search" placeholder="Buscar pelo nome do furo" title="Atalho: /" autocomplete="off" />
+            </label>
+            <label class="home-check">
+              <input id="home-with-core" type="checkbox" />
+              <span>Com intervalos</span>
+            </label>
+            <button type="button" id="home-import" class="btn-quiet">Abrir arquivo</button>
+            <button type="button" id="hole-new" class="btn">Nova sondagem</button>
+          </div>
+          <div id="home-continue" class="continue-bar" hidden></div>
+          <div id="home-catalog"></div>
+        </div>
+      </section>
+
+      <div class="layout" hidden>
         <section class="panel" aria-labelledby="form-title">
-          <section class="side-block">
-          <h2 id="form-title">
-            <svg class="title-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 2.5v11M3.5 8h9" />
-              <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-            </svg>
-            <span id="form-heading">Novo taquinho</span>
-          </h2>
+          <section class="side-block entry-block">
+          <header class="entry-head">
+            <h2 id="form-title">
+              <span id="form-heading">Novo taquinho</span>
+            </h2>
+            <p id="next-depth" class="next-depth">O primeiro intervalo começa em 0,00 m.</p>
+          </header>
           <form id="taquinho-form" class="form">
-            <label class="field">
-              <span>Avanço (m)</span>
-              <input
-                name="avanco"
-                type="text"
-                inputmode="decimal"
-                placeholder="ex.: 3,00"
-                autocomplete="off"
-                required
-              />
-            </label>
-            <label class="field">
-              <span>Recuperação (m)</span>
-              <input
-                name="recuperacao"
-                type="text"
-                inputmode="decimal"
-                placeholder="ex.: 2,70"
-                autocomplete="off"
-                required
-              />
-            </label>
+            <div class="measure-pair">
+              <label class="field" title="Metros perfurados neste intervalo. A profundidade é a soma dos avanços.">
+                <span>Avanço <i class="unit">m</i></span>
+                <input
+                  name="avanco"
+                  type="text"
+                  inputmode="decimal"
+                  placeholder="0,00"
+                  autocomplete="off"
+                  required
+                />
+              </label>
+              <label class="field" title="Comprimento de testemunho que entra na caixa. Não pode passar do avanço.">
+                <span>Recuperação <i class="unit">m</i></span>
+                <input
+                  name="recuperacao"
+                  type="text"
+                  inputmode="decimal"
+                  placeholder="0,00"
+                  autocomplete="off"
+                  required
+                />
+              </label>
+            </div>
             <label class="field field--full">
               <span>Informação</span>
               <input
                 name="info"
                 type="text"
-                placeholder="ex.: arenito"
+                placeholder="opcional"
                 maxlength="80"
               />
             </label>
-            <div class="field field--full">
-              <span id="color-label">Cor do material · <span id="color-current" class="color-current">Marrom</span></span>
+            <div class="field field--full color-field">
+              <span id="color-label">Cor <span id="color-current" class="color-current" style="--swatch:#8d5a32">Marrom</span></span>
               <div class="palette-row">
                 <div id="color-palette" class="palette" role="group" aria-labelledby="color-label"></div>
                 <label class="swatch-custom" title="Personalizada">
@@ -196,8 +233,58 @@
               </div>
               <input type="hidden" name="cor" value="#8d5a32" />
             </div>
-            <button type="submit" id="taquinho-submit" class="btn">Adicionar taquinho</button>
-            <button type="button" id="edit-cancel" class="btn-quiet" hidden>Cancelar edição</button>
+            <div id="geo-fields" class="geo-fields" hidden>
+              <p class="field-hint">Opcional. Estes campos só guardam o que você escrever. A cor do desenho continua a escolhida acima.</p>
+              <label class="field field--full">
+                <span>Litologia</span>
+                <input name="litologia" type="text" list="litologia-list" maxlength="40" placeholder="ex.: arenito" autocomplete="off" />
+              </label>
+              <datalist id="litologia-list">
+                <option value="Arenito"></option>
+                <option value="Siltito"></option>
+                <option value="Argilito"></option>
+                <option value="Folhelho"></option>
+                <option value="Basalto"></option>
+                <option value="Granito"></option>
+                <option value="Gnaisse"></option>
+                <option value="Quartzito"></option>
+                <option value="Xisto"></option>
+                <option value="Calcário"></option>
+                <option value="Laterita"></option>
+                <option value="Solo"></option>
+              </datalist>
+              <label class="field">
+                <span>Alteração</span>
+                <input name="alteracao" type="text" list="alteracao-list" maxlength="24" placeholder="opcional" autocomplete="off" />
+              </label>
+              <datalist id="alteracao-list">
+                <option value="Incipiente"></option>
+                <option value="Fraca"></option>
+                <option value="Moderada"></option>
+                <option value="Forte"></option>
+              </datalist>
+              <label class="field">
+                <span>Fraturamento</span>
+                <input name="fraturamento" type="text" list="fratura-list" maxlength="24" placeholder="opcional" autocomplete="off" />
+              </label>
+              <datalist id="fratura-list">
+                <option value="Baixo"></option>
+                <option value="Moderado"></option>
+                <option value="Alto"></option>
+              </datalist>
+              <label class="field field--full">
+                <span>Mineralização</span>
+                <input name="mineralizacao" type="text" maxlength="80" placeholder="opcional" autocomplete="off" />
+              </label>
+              <label class="field field--full">
+                <span>Observações</span>
+                <textarea name="observacoes" maxlength="400" rows="2" placeholder="opcional"></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="taquinho-submit" class="btn">Adicionar taquinho</button>
+              <button type="button" id="edit-cancel" class="btn-quiet" hidden>Cancelar edição</button>
+            </div>
           </form>
           <p id="form-error" class="form-error" hidden></p>
           <p id="form-note" class="form-note" hidden></p>
@@ -206,11 +293,15 @@
             <p><span>Recuperação</span><strong id="stat-recovery"></strong></p>
             <p><span>Percentual</span><strong id="stat-ratio"></strong></p>
             <p><span>Caixas</span><strong id="stat-boxes"></strong></p>
-            <div id="recovery-meter" class="recovery-meter" hidden>
-              <span id="recovery-fill"></span>
-            </div>
+            <p><span>Canaletas</span><strong id="stat-channels"></strong></p>
+            <p><span>Com perda</span><strong id="stat-loss"></strong></p>
+            <ul id="lithology-legend" class="lithology-legend" hidden></ul>
+            <ul id="audit-list" class="audit-list" hidden></ul>
           </div>
-          <p id="next-depth" class="next-depth">O primeiro intervalo começa em 0,00 m.</p>
+          <details id="change-log" class="change-log" hidden>
+            <summary>Alterações neste navegador</summary>
+            <ol id="change-list"></ol>
+          </details>
           <p id="accum-summary" class="accum-summary" hidden></p>
           </section>
 
@@ -231,6 +322,16 @@
               autocomplete="off"
             />
           </label>
+          <div id="depth-filter" class="form depth-filter" hidden>
+            <label class="field">
+              <span>Profundidade de</span>
+              <input id="filter-from" type="text" inputmode="decimal" placeholder="0,00" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>até</span>
+              <input id="filter-to" type="text" inputmode="decimal" placeholder="10,00" autocomplete="off" />
+            </label>
+          </div>
           <ul id="taquinho-list" class="taquinho-list"></ul>
           <p id="list-empty" class="list-empty">Nenhum taquinho neste furo. O que for lançado fica salvo neste navegador.</p>
           <p id="list-miss" class="list-empty" hidden>Nenhum taquinho corresponde a esse filtro.</p>
@@ -243,11 +344,12 @@
               <path d="M8 1.8v2.2M8 12v2.2M1.8 8h2.2M12 8h2.2" />
             </svg>
             Localizar profundidade
-            <button type="button" class="fold-btn" aria-expanded="true" aria-controls="locate-body" aria-label="Recolher localizar profundidade">
+            <button type="button" class="fold-btn" aria-expanded="false" aria-controls="locate-body" aria-label="Mostrar localizar profundidade">
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10.5 12 6.5" /></svg>
             </button>
           </h2>
-          <div id="locate-body">
+          <div id="locate-body" hidden>
+          <p class="field-hint">Informe a profundidade do furo para ver a caixa e a canaleta.</p>
           <form id="locate-form" class="form">
             <label class="field field--full">
               <span>Profundidade desejada (m)</span>
@@ -272,11 +374,12 @@
               <path d="M2.5 11.5h11M4 11.5v-2M7 11.5V7.5M10 11.5V6M13 11.5V4.5" />
             </svg>
             Profundidade pela trena
-            <button type="button" class="fold-btn" aria-expanded="true" aria-controls="inverse-body" aria-label="Recolher profundidade pela trena">
+            <button type="button" class="fold-btn" aria-expanded="false" aria-controls="inverse-body" aria-label="Mostrar profundidade pela trena">
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10.5 12 6.5" /></svg>
             </button>
           </h2>
-          <div id="inverse-body">
+          <div id="inverse-body" hidden>
+          <p class="field-hint">Meça na canaleta e o sistema devolve a profundidade do furo.</p>
           <form id="inverse-form" class="form">
             <label class="field field--full">
               <span>Intervalo</span>
@@ -309,9 +412,9 @@
               <button type="button" id="zoom-reset" title="Atalho: 0">Ver tudo</button>
               <span id="zoom-label">100%</span>
               <button type="button" id="tray-expand" aria-pressed="false">Ampliar</button>
-              <button type="button" id="shortcuts-open">Atalhos</button>
             </div>
             <div id="box-rail" class="box-rail" role="toolbar" aria-label="Caixas" hidden></div>
+            <input id="interval-photo-file" type="file" accept="image/*" hidden />
             </div>
             <div class="tray-stage">
             <svg
@@ -324,7 +427,7 @@
             >
               <title id="tray-title">Caixa com três canaletas</title>
               <desc id="tray-desc">
-                Vista superior. O testemunho entra pelo topo de cada canaleta e desce.
+                Vista superior. O testemunho entra pela base de cada canaleta e sobe.
               </desc>
             <defs></defs>
               <g id="tray-root"></g>
@@ -336,7 +439,7 @@
             <div id="tag-layer" class="tag-layer"></div>
             </div>
 
-            <p class="scale scale--width">O zero fica no topo. Passe o mouse no testemunho para ver a profundidade. Aproxime com + e −, ou com a roda do mouse.</p>
+            <p class="scale scale--width">O zero fica na base e o testemunho sobe. Passe o mouse no material para ver a profundidade. Aproxime com + e −, ou com a roda do mouse.</p>
             <ul class="legend">
               <li><i class="legend-swatch legend-swatch--channel" aria-hidden="true"></i>Canaleta</li>
               <li><i class="legend-swatch legend-swatch--tag" aria-hidden="true"></i>Taquinho</li>
@@ -365,6 +468,9 @@
           <li>Diminuir o zoom <kbd>−</kbd></li>
           <li>Ver a caixa inteira <kbd>0</kbd></li>
           <li>Desfazer o último lançamento <kbd>Ctrl Z</kbd></li>
+          <li>Salvar o taquinho <kbd>Ctrl Enter</kbd></li>
+          <li>Caixa anterior e próxima <kbd>←</kbd> <kbd>→</kbd></li>
+          <li>Intervalo anterior e próximo <kbd>[</kbd> <kbd>]</kbd></li>
           <li>Soltar a marcação <kbd>Esc</kbd></li>
         </ul>
         <div class="sheet-actions">
@@ -372,6 +478,21 @@
         </div>
       </form>
     </dialog>
-    <script src="app.js?v=19"></script>
+    <dialog id="photo-dialog" class="sheet sheet--photo">
+      <form method="dialog" class="sheet-card">
+        <h2>Fotografia do intervalo</h2>
+        <img id="photo-full" alt="" />
+        <label class="field field--full">
+          <span>Observação da imagem</span>
+          <textarea id="photo-note" maxlength="200" rows="2"></textarea>
+        </label>
+        <div class="sheet-actions">
+          <button type="button" id="photo-remove" class="btn-quiet">Remover foto</button>
+          <button value="close" class="btn">Fechar</button>
+        </div>
+      </form>
+    </dialog>
+    <article id="print-sheet" class="print-sheet"></article>
+    <script src="app.js?v=31"></script>
   </body>
 </html>

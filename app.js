@@ -84,6 +84,114 @@ function depthSpan(interval) {
   return `${metersLabel(interval.profundidadeInicialMm)}–${formatMeters(interval.profundidadeFinalMm)}`;
 }
 
+function normalizeGeo(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const clip = (value, max) => String(value || "").trim().slice(0, max);
+  return {
+    litologia: clip(source.litologia, 40),
+    alteracao: clip(source.alteracao, 24),
+    fraturamento: clip(source.fraturamento, 24),
+    mineralizacao: clip(source.mineralizacao, 80),
+    observacoes: clip(source.observacoes, 400),
+  };
+}
+
+function geoIsEmpty(geo) {
+  const value = normalizeGeo(geo);
+  return !value.litologia && !value.alteracao && !value.fraturamento && !value.mineralizacao && !value.observacoes;
+}
+
+function meterSlices(intervals) {
+  if (!intervals.length) return [];
+  const end = intervals[intervals.length - 1].profundidadeFinalMm;
+  const count = Math.ceil(end / 1000);
+  const buckets = [];
+  for (let meter = 0; meter < count; meter += 1) {
+    const from = meter * 1000;
+    const to = Math.min((meter + 1) * 1000, end);
+    let advance = 0;
+    let recovery = 0;
+    let bestId = null;
+    let bestSlice = 0;
+    for (const interval of intervals) {
+      const start = Math.max(from, interval.profundidadeInicialMm);
+      const stop = Math.min(to, interval.profundidadeFinalMm);
+      const slice = stop - start;
+      if (slice <= 0 || interval.avancoMm <= 0) continue;
+      advance += slice;
+      recovery += (slice / interval.avancoMm) * interval.recuperacaoMm;
+      if (slice > bestSlice) {
+        bestSlice = slice;
+        bestId = interval.id;
+      }
+    }
+    buckets.push({
+      from,
+      to,
+      advance,
+      recovery,
+      id: bestId,
+      pct: advance > 0 ? (recovery / advance) * 100 : 0,
+    });
+  }
+  return buckets;
+}
+
+function auditIntervals(intervals) {
+  const issues = [];
+  for (let i = 0; i < intervals.length; i += 1) {
+    const item = intervals[i];
+    const label = `Taquinho ${item.index + 1} (${depthSpan(item)})`;
+    if (!(item.avancoMm > 0)) {
+      issues.push({ level: "erro", id: item.id, text: `${label}: o avanço precisa ser maior que zero.` });
+    }
+    if (item.recuperacaoMm < 0) {
+      issues.push({ level: "erro", id: item.id, text: `${label}: a recuperação não pode ser negativa.` });
+    }
+    if (item.recuperacaoMm > item.avancoMm) {
+      issues.push({
+        level: "erro",
+        id: item.id,
+        text: `${label}: a recuperação (${formatMeters(item.recuperacaoMm)}) é maior que o avanço (${formatMeters(item.avancoMm)}). Edite o intervalo; os números não foram alterados.`,
+      });
+    }
+    if (item.profundidadeFinalMm < item.profundidadeInicialMm) {
+      issues.push({ level: "erro", id: item.id, text: `${label}: a profundidade final ficou menor que a inicial.` });
+    }
+    if (i > 0 && item.profundidadeInicialMm !== intervals[i - 1].profundidadeFinalMm) {
+      issues.push({
+        level: "erro",
+        id: item.id,
+        text: `Há um vão ou uma sobreposição de profundidade entre o taquinho ${intervals[i - 1].index + 1} e o taquinho ${item.index + 1}.`,
+      });
+    }
+  }
+  const spans = [];
+  for (const item of intervals) {
+    if (item.recuperacaoMm <= 0) continue;
+    for (const seg of recoverySegments(item.physicalInicialMm, item.physicalFinalMm)) {
+      const origin = seg.channelIndex * LENGTH * MM;
+      spans.push({
+        id: item.id,
+        n: item.index + 1,
+        start: origin + seg.localStartMm,
+        end: origin + seg.localEndMm,
+      });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < spans.length; i += 1) {
+    if (spans[i].start < spans[i - 1].end) {
+      issues.push({
+        level: "erro",
+        id: spans[i].id,
+        text: `Os taquinhos ${spans[i - 1].n} e ${spans[i].n} ocupam o mesmo trecho da caixa. Nada foi movido automaticamente.`,
+      });
+    }
+  }
+  return issues;
+}
+
 function formatCmFromMm(mm) {
   if (mm % 10 === 0) return `${mm / 10} cm`;
   return `${(mm / 10).toFixed(1)} cm`;
@@ -273,13 +381,21 @@ function currentIntervals() {
   return accumulateIntervals(taquinhos);
 }
 
-function boxCount() {
+function boxesFor(intervals) {
   let maxBox = 0;
-  for (const interval of currentIntervals()) {
+  let any = false;
+  for (const interval of intervals) {
     if (interval.recuperacaoMm <= 0) continue;
-    maxBox = Math.max(maxBox, intervalBlock(interval).box);
+    const block = intervalBlock(interval);
+    if (!block) continue;
+    any = true;
+    maxBox = Math.max(maxBox, block.box);
   }
-  return maxBox + 1;
+  return any ? maxBox + 1 : 0;
+}
+
+function boxCount() {
+  return Math.max(1, boxesFor(currentIntervals()));
 }
 
 function boxOrigin(index) {
@@ -290,9 +406,9 @@ function xu(cm) {
   return cm;
 }
 
-/** 0 cm fica no topo da canaleta; a posição cresce para baixo. */
+/** 0 cm fica na base da canaleta; a posição cresce para cima. */
 function yFromBase(y0, cmFromBase) {
-  return y0 + cmFromBase;
+  return y0 + (LENGTH - cmFromBase);
 }
 
 function normalizeHex(value) {
@@ -397,7 +513,7 @@ function addSideCmTicks(group, xEdge, y0, direction) {
     if (cm % 10 === 0) {
       const label = el("text", {
         x: xEdge + direction * (major + 0.2),
-        y: y + 0.32,
+        y: cm === 0 ? y - 0.15 : cm === LENGTH ? y + 0.85 : y + 0.32,
         "text-anchor": direction < 0 ? "end" : "start",
         fill: "var(--text)",
         "font-size": 0.85,
@@ -409,8 +525,8 @@ function addSideCmTicks(group, xEdge, y0, direction) {
   }
 }
 
-function drawBox(parent, boxIndex) {
-  const ox = boxOrigin(boxIndex);
+function drawBox(parent, boxIndex, originX) {
+  const ox = originX == null ? boxOrigin(boxIndex) : originX;
   const y0 = PAD_T + LABEL_BAND;
   const channelX = [];
   const shell = el("g", { class: "tray-top" });
@@ -595,7 +711,13 @@ function buildTopView() {
   layout.boxes = [];
 
   const count = boxCount();
-  for (let i = 0; i < count; i++) drawBox(root, i);
+  if (soloBox && count > 0) {
+    const index = Math.min(Math.max(focusedBox ?? 0, 0), count - 1);
+    focusedBox = index;
+    drawBox(root, index, PAD_L);
+  } else {
+    for (let i = 0; i < count; i++) drawBox(root, i);
+  }
 
   applyCamera();
 }
@@ -616,12 +738,14 @@ function renderCores(intervals) {
       const height = seg.lengthMm / MM;
       if (height <= 0) continue;
       const inset = 0.16;
-      const y = yFromBase(box.y0, seg.localStartMm / MM);
+      const y = yFromBase(box.y0, seg.localEndMm / MM);
       const absStart = seg.channelIndex * LENGTH * MM + seg.localStartMm;
       const absEnd = seg.channelIndex * LENGTH * MM + seg.localEndMm;
+      const classes = ["core"];
+      if (interval.id === selectedId) classes.push("is-picked");
       root.appendChild(
         el("rect", {
-          class: interval.id === selectedId ? "core is-picked" : "core",
+          class: classes.join(" "),
           "data-id": interval.id,
           "data-length-mm": seg.lengthMm,
           "data-abs-start-mm": absStart,
@@ -671,13 +795,14 @@ function renderTaquinhos(intervals) {
     const cx = left;
     const localTop = place.topStart - place.slotStart;
     const localBody = place.bodyStart - place.slotStart;
-    const topY = yFromBase(box.y0, localTop);
-    const bodyY = yFromBase(box.y0, localBody);
+    const topY = yFromBase(box.y0, localTop + TOP_LEN);
+    const bodyY = yFromBase(box.y0, localBody + BODY_LEN);
     const lines = [
       `A: ${formatMeters(t.avancoMm)}`,
       `R: ${formatMeters(t.recuperacaoMm)}`,
       `P: ${depthSpan(t)}`,
     ];
+    if (t.geo?.litologia) lines.push(t.geo.litologia);
 
     const g = el("g", {
       class: t.id === selectedId ? "taquinho is-picked" : "taquinho",
@@ -730,6 +855,23 @@ function formatCm(n) {
   return Number.isInteger(n) ? `${n} cm` : `${n.toFixed(1)} cm`;
 }
 
+function depthBounds() {
+  const read = (id) => {
+    const raw = document.getElementById(id)?.value ?? "";
+    if (!String(raw).trim()) return null;
+    const parsed = parseMetersToMm(raw);
+    return parsed.ok ? parsed.mm : null;
+  };
+  return { from: read("filter-from"), to: read("filter-to") };
+}
+
+function intervalMatchesDepth(interval, bounds) {
+  if (bounds.from == null && bounds.to == null) return true;
+  if (bounds.to != null && interval.profundidadeInicialMm > bounds.to) return false;
+  if (bounds.from != null && interval.profundidadeFinalMm < bounds.from) return false;
+  return true;
+}
+
 function listQuery() {
   return (document.getElementById("list-filter")?.value || "").trim().toLocaleLowerCase("pt-BR");
 }
@@ -744,6 +886,11 @@ function intervalSearchText(interval) {
     depthSpan(interval),
     formatMeters(interval.avancoMm),
     formatMeters(interval.recuperacaoMm),
+    interval.geo?.litologia || "",
+    interval.geo?.alteracao || "",
+    interval.geo?.fraturamento || "",
+    interval.geo?.mineralizacao || "",
+    interval.geo?.observacoes || "",
     where,
   ]
     .join(" ")
@@ -760,12 +907,17 @@ function renderList(intervals) {
   if (!list || !empty) return;
 
   const query = listQuery();
+  const bounds = depthBounds();
+  const depthOn = bounds.from != null || bounds.to != null;
   if (filterField) filterField.hidden = intervals.length === 0;
+  const depthFilter = document.getElementById("depth-filter");
+  if (depthFilter) depthFilter.hidden = intervals.length === 0;
   list.replaceChildren();
   let shown = 0;
 
   for (const t of intervals) {
     if (query && !intervalSearchText(t).includes(query)) continue;
+    if (!intervalMatchesDepth(t, bounds)) continue;
     shown += 1;
     const li = document.createElement("li");
     li.dataset.id = t.id;
@@ -775,6 +927,8 @@ function renderList(intervals) {
     li.style.borderLeftColor = color;
     const hasCore = t.recuperacaoMm > 0;
     if (!hasCore) li.classList.add("is-empty-recovery");
+    else if (t.recuperacaoMm < t.avancoMm) li.classList.add("is-partial");
+    else if (t.recuperacaoMm > t.avancoMm) li.classList.add("is-excess");
     const place = intervalBlock(t);
     const where = place
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
@@ -784,7 +938,15 @@ function renderList(intervals) {
     li.innerHTML = `
       <div class="card-body">
         <div class="card-head">
-          <strong><span class="swatch" style="background:${color}"></span>Taquinho ${t.index + 1}</strong>
+          <strong><span class="swatch" style="background:${color}"></span>Taquinho ${t.index + 1}${
+            !hasCore
+              ? `<span class="loss-badge is-zero">Sem testemunho</span>`
+              : t.recuperacaoMm < t.avancoMm
+                ? `<span class="loss-badge">Perda</span>`
+                : t.recuperacaoMm > t.avancoMm
+                  ? `<span class="loss-badge is-excess">R &gt; A</span>`
+                  : ""
+          }</strong>
           <span class="chip">${where}</span>
         </div>
         <dl class="specs">
@@ -792,7 +954,9 @@ function renderList(intervals) {
           <div><dt><span class="spec-k">A</span> · Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
           <div><dt><span class="spec-k">R</span> · Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
           <div><dt>Na caixa</dt><dd>${hasCore ? recovered : "—"}</dd></div>
+          <div><dt>%</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
           <div><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
+          ${t.geo?.litologia ? `<div><dt>Litologia</dt><dd>${escapeHtml(t.geo.litologia)}</dd></div>` : ""}
         </dl>
         ${
           place?.shifted
@@ -825,12 +989,23 @@ function renderList(intervals) {
       copyIntervalLine(t);
     });
     actions.appendChild(copyBtn);
+    const photoBtn = document.createElement("button");
+    photoBtn.type = "button";
+    photoBtn.className = "btn-quiet";
+    photoBtn.textContent = "Foto";
+    photoBtn.addEventListener("click", () => openIntervalPhoto(t.id));
+    actions.appendChild(photoBtn);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn-remove";
     btn.textContent = "Remover";
-    btn.addEventListener("click", () => {
-      snapshotLog();
+    btn.addEventListener("click", async () => {
+      const ok = await askConfirm(
+        `Remover o taquinho ${t.index + 1} (${depthSpan(t)})? Os intervalos seguintes são recalculados. Desfazer recupera este lançamento.`,
+        "Remover",
+      );
+      if (!ok || !taquinhos.some((item) => item.id === t.id)) return;
+      snapshotLog("Taquinho removido");
       if (editingId === t.id) beginEdit(null);
       if (selectedId === t.id) selectedId = null;
       taquinhos = taquinhos.filter((x) => x.id !== t.id);
@@ -840,13 +1015,18 @@ function renderList(intervals) {
     });
     actions.appendChild(btn);
     li.appendChild(actions);
+    li.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("button")) return;
+      revealInterval(t.id, { zoom: false });
+    });
     list.appendChild(li);
   }
 
   empty.hidden = intervals.length > 0;
   if (miss) miss.hidden = !(intervals.length > 0 && shown === 0);
   if (count) {
-    count.textContent = !intervals.length ? "" : query ? `${shown} de ${intervals.length}` : String(intervals.length);
+    const active = query || depthOn;
+    count.textContent = !intervals.length ? "" : active ? `${shown} de ${intervals.length}` : String(intervals.length);
   }
   if (summary) summary.hidden = true;
   renderHoleStatus(intervals);
@@ -929,6 +1109,7 @@ function renderAll() {
   renderTaquinhos(intervals);
   renderConsulta();
   renderBoxRail();
+  renderIntervalPanel();
 }
 
 function clearConsulta() {
@@ -1014,7 +1195,14 @@ function bindForm() {
     }
 
     const registeredRecovery = roundCoreMm(recuperacao.mm);
+    if (registeredRecovery > avanco.mm) {
+      showError(
+        "A recuperação não pode passar do avanço. Ajuste os valores: o que já foi digitado continua no formulário.",
+      );
+      return;
+    }
     const color = normalizeHex(data.get("cor"));
+    const geo = readGeoForm(form);
     const roundingNote =
       registeredRecovery === recuperacao.mm
         ? ""
@@ -1027,16 +1215,17 @@ function bindForm() {
         showError("Esse taquinho não está mais neste furo.");
         return;
       }
-      snapshotLog();
+      snapshotLog("Taquinho editado");
       current.avancoMm = avanco.mm;
       current.recuperacaoMm = registeredRecovery;
       current.info = info;
       current.color = color;
+      current.geo = geo;
       freshId = current.id;
       beginEdit(null);
       showNote(roundingNote || "Taquinho atualizado.");
     } else {
-      snapshotLog();
+      snapshotLog("Taquinho adicionado");
       const id = crypto.randomUUID();
       freshId = id;
       taquinhos.push({
@@ -1045,6 +1234,7 @@ function bindForm() {
         recuperacaoMm: registeredRecovery,
         info,
         color,
+        geo,
       });
       showNote(roundingNote);
     }
@@ -1055,7 +1245,14 @@ function bindForm() {
     form.avanco.value = "";
     form.recuperacao.value = "";
     form.info.value = "";
+    writeGeoForm(form, {});
     form.avanco.focus();
+  });
+
+  form.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    form.requestSubmit();
   });
 }
 
@@ -1077,41 +1274,7 @@ function bindLocate() {
       );
       return;
     }
-
-    const intervals = currentIntervals();
-    const interval = findIntervalAtDepth(intervals, parsed.mm);
-    if (!interval) {
-      consulta = null;
-      renderConsulta();
-      showCalcResult("locate-result", "Essa profundidade não está em nenhum intervalo informado.", true);
-      return;
-    }
-    if (interval.recuperacaoMm === 0) {
-      consulta = null;
-      renderConsulta();
-      showCalcResult(
-        "locate-result",
-        `O taquinho ${interval.index + 1} não tem testemunho recuperado, então não há onde medir na trena.`,
-        true,
-      );
-      return;
-    }
-
-    const tapeUm = tapeUmFromDepth(interval, parsed.mm);
-    const physicalUm = interval.physicalInicialMm * 1000 + tapeUm;
-    consulta = {
-      depthUm: parsed.mm * 1000,
-      tapeUm,
-      physicalUm,
-      intervalIndex: interval.index,
-    };
-    const place = physicalPlace(physicalUm);
-    showCalcResult(
-      "locate-result",
-      `No taquinho ${interval.index + 1} (${formatMeters(interval.profundidadeInicialMm)}–${formatMeters(interval.profundidadeFinalMm)}), a profundidade ${formatMeters(parsed.mm)} fica a ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} do topo.`,
-      false,
-    );
-    renderConsulta();
+    locateDepth(parsed.mm, "locate-result");
   });
 }
 
@@ -1171,7 +1334,7 @@ function bindInverse() {
     const place = physicalPlace(physicalUm);
     showCalcResult(
       "inverse-result",
-      `A ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho do taquinho ${interval.index + 1}, a profundidade é ${formatMetersUm(depthUm)}. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} do topo.`,
+      `A ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho do taquinho ${interval.index + 1}, a profundidade é ${formatMetersUm(depthUm)}. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} da base.`,
       false,
     );
     renderConsulta();
@@ -1184,11 +1347,12 @@ const camera = {
   cy: 0,
 };
 let focusedBox = null;
+let soloBox = false;
 
 function renderBoxRail() {
   const rail = document.getElementById("box-rail");
   if (!rail) return;
-  const count = layout.boxes.length;
+  const count = boxCount();
   rail.hidden = count < 2;
   rail.replaceChildren();
   if (count < 2) {
@@ -1211,15 +1375,26 @@ function renderBoxRail() {
 }
 
 function focusBox(index) {
-  const box = layout.boxes[index];
-  if (!box) return;
+  const count = boxCount();
+  if (index < 0 || index >= count) return;
   focusedBox = index;
-  const size = fullSize();
-  const fit = Math.min(3.2, Math.max(1, size.w / (totalW + BOX_GAP)));
-  camera.zoom = Math.max(camera.zoom, fit);
-  camera.cx = box.ox + totalW / 2;
-  camera.cy = size.h / 2;
-  applyCamera();
+  if (soloBox) {
+    buildTopView();
+    const intervals = currentIntervals();
+    renderCores(intervals);
+    renderTaquinhos(intervals);
+    renderConsulta();
+    fitCamera();
+  } else {
+    const box = layout.boxes[index];
+    if (!box) return;
+    const size = fullSize();
+    const fit = Math.min(3.2, Math.max(1, size.w / (totalW + BOX_GAP)));
+    camera.zoom = Math.max(camera.zoom, fit);
+    camera.cx = box.ox + totalW / 2;
+    camera.cy = size.h / 2;
+    applyCamera();
+  }
   document.querySelectorAll("#box-rail button").forEach((button) => {
     const on = Number(button.dataset.box) === index;
     button.classList.toggle("is-current", on);
@@ -1241,11 +1416,19 @@ function resetCamera() {
 }
 
 function fullSize() {
-  const n = boxCount();
+  const n = soloBox ? 1 : boxCount();
   return {
     w: PAD_L + n * totalW + Math.max(0, n - 1) * BOX_GAP + PAD_R,
     h: PAD_T + LABEL_BAND + LENGTH + PAD_B,
   };
+}
+
+function fitCamera() {
+  const size = fullSize();
+  camera.zoom = 1;
+  camera.cx = size.w / 2;
+  camera.cy = size.h / 2;
+  applyCamera();
 }
 
 function applyCamera() {
@@ -1346,6 +1529,15 @@ function bindZoom() {
   document.getElementById("zoom-reset")?.addEventListener("click", () => {
     resetCamera();
   });
+  document.getElementById("zoom-detail")?.addEventListener("click", () => {
+    const size = fullSize();
+    camera.zoom = 2.6;
+    if (focusedBox != null && layout.boxes[focusedBox]) {
+      camera.cx = layout.boxes[focusedBox].ox + totalW / 2;
+    }
+    camera.cy = size.h / 2;
+    applyCamera();
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1364,6 +1556,18 @@ function bindZoom() {
     } else if (event.key === "?") {
       event.preventDefault();
       document.getElementById("shortcuts-dialog")?.showModal();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      focusBox((focusedBox ?? 0) - 1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      focusBox((focusedBox ?? -1) + 1);
+    } else if (event.key === "[") {
+      event.preventDefault();
+      stepInterval(-1);
+    } else if (event.key === "]") {
+      event.preventDefault();
+      stepInterval(1);
     }
   });
 }
@@ -1376,7 +1580,10 @@ function selectMaterialColor(hex) {
   const palette = document.getElementById("color-palette");
   if (hidden) hidden.value = normalized;
   const match = MATERIAL_COLORS.some((color) => color.hex === normalized);
-  if (current) current.textContent = materialName(normalized);
+  if (current) {
+    current.textContent = materialName(normalized);
+    current.style.setProperty("--swatch", normalized);
+  }
   palette?.querySelectorAll(".swatch-btn").forEach((button) => {
     const on = button.dataset.hex === normalized;
     button.classList.toggle("is-selected", on);
@@ -1591,7 +1798,8 @@ async function ensureLocalTestUser() {
   localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
 }
 
-const localTestUserReady = ensureLocalTestUser();
+const localTestUserReady =
+  typeof localStorage === "undefined" ? Promise.resolve() : ensureLocalTestUser();
 
 function bindAuth() {
   const form = document.getElementById("login-form");
@@ -1772,7 +1980,7 @@ function readingFromPointer(core, point) {
   if (!box) return null;
   const startMm = Number(core.getAttribute("data-abs-start-mm"));
   const endMm = Number(core.getAttribute("data-abs-end-mm"));
-  const localCm = Math.min(LENGTH, Math.max(0, point.y - box.y0));
+  const localCm = Math.min(LENGTH, Math.max(0, LENGTH - (point.y - box.y0)));
   const absMm = Math.min(endMm, Math.max(startMm, channelIndex * LENGTH * MM + localCm * MM));
   const offsetMm = Math.round(absMm - interval.physicalInicialMm);
   const depthUm = estimateDepthUm(interval, offsetMm);
@@ -1901,6 +2109,20 @@ function bindProbe() {
     drawProbe(reading);
     showReadingTip(reading, event.clientX, event.clientY, true);
     setActiveInterval(reading.id);
+    const place = intervalBlock(currentIntervals().find((item) => item.id === reading.id));
+    if (place && soloBox && focusedBox !== place.box) {
+      selectedId = reading.id;
+      focusedBox = place.box;
+      renderAll();
+      return;
+    }
+    selectedId = reading.id;
+    document.querySelectorAll(".core, .taquinho, #taquinho-list > li").forEach((node) => {
+      const nodeId = node.dataset.id || node.getAttribute("data-id");
+      node.classList.toggle("is-picked", nodeId === reading.id);
+    });
+    renderIntervalPanel();
+    document.querySelector(`#taquinho-list li[data-id="${CSS.escape(reading.id)}"]`)?.scrollIntoView({ block: "nearest" });
   });
 
   const showFace = (event) => {
@@ -2232,13 +2454,18 @@ function currentHole() {
 }
 
 function serializeLog(items) {
-  return items.map((item) => ({
-    id: item.id,
-    avancoMm: item.avancoMm,
-    recuperacaoMm: item.recuperacaoMm,
-    info: item.info || "",
-    color: normalizeHex(item.color),
-  }));
+  return items.map((item) => {
+    const row = {
+      id: item.id,
+      avancoMm: item.avancoMm,
+      recuperacaoMm: item.recuperacaoMm,
+      info: item.info || "",
+      color: normalizeHex(item.color),
+    };
+    const geo = normalizeGeo(item.geo);
+    if (!geoIsEmpty(geo)) row.geo = geo;
+    return row;
+  });
 }
 
 function sanitizeStored(items) {
@@ -2250,13 +2477,16 @@ function sanitizeStored(items) {
     const recuperacaoMm = Number(item.recuperacaoMm);
     if (!Number.isSafeInteger(avancoMm) || avancoMm <= 0) continue;
     if (!Number.isSafeInteger(recuperacaoMm) || recuperacaoMm < 0) continue;
-    stored.push({
+    const row = {
       id: typeof item.id === "string" && item.id ? item.id : crypto.randomUUID(),
       avancoMm,
       recuperacaoMm,
       info: String(item.info || "").slice(0, 80),
       color: normalizeHex(item.color),
-    });
+    };
+    const geo = normalizeGeo(item.geo);
+    if (!geoIsEmpty(geo)) row.geo = geo;
+    stored.push(row);
   }
   return stored;
 }
@@ -2295,23 +2525,21 @@ function renderHoleStatus(intervals) {
       if (recovery) recovery.textContent = formatMeters(last.recuperacaoFinalMm);
       if (ratio) ratio.textContent = formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm);
       if (boxes) boxes.textContent = String(boxCount());
+      const channels = document.getElementById("stat-channels");
+      const loss = document.getElementById("stat-loss");
+      if (channels) channels.textContent = String(usedChannels(intervals));
+      if (loss) {
+        const count = intervals.filter((interval) => interval.recuperacaoMm < interval.avancoMm).length;
+        loss.textContent = String(count);
+      }
+      renderAudit(intervals);
+      renderLithologyLegend(intervals);
       const pct = last.profundidadeFinalMm > 0
         ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
         : null;
       if (ratio) {
         ratio.classList.toggle("is-bad", pct != null && pct < 70);
         ratio.classList.toggle("is-warn", pct != null && pct >= 70 && pct < 90);
-      }
-      const meter = document.getElementById("recovery-meter");
-      const fill = document.getElementById("recovery-fill");
-      if (meter && fill) {
-        meter.hidden = pct == null;
-        meter.classList.toggle("is-bad", pct != null && pct < 70);
-        meter.classList.toggle("is-warn", pct != null && pct >= 70 && pct < 90);
-        if (pct != null) {
-          fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-          meter.title = `Recuperação ${String(pct).replace(".", ",")}% do avanço`;
-        }
       }
     }
   }
@@ -2321,6 +2549,7 @@ function renderHoleStatus(intervals) {
       : "O primeiro intervalo começa em 0,00 m.";
   }
   syncLogActions();
+  renderHistory();
 }
 
 function syncLogActions() {
@@ -2340,18 +2569,257 @@ function syncLogActions() {
 }
 
 function refreshHoleSelect() {
-  const select = document.getElementById("hole-list");
-  if (!select) return;
-  const labels = holes.map((hole) => hole.name.trim() || "Sem nome");
-  select.replaceChildren();
-  holes.forEach((hole, index) => {
-    const option = document.createElement("option");
-    option.value = hole.id;
-    const label = hole.name.trim() || "Sem nome";
-    option.textContent = labels.filter((item) => item === label).length > 1 ? `${label} (${index + 1})` : label;
-    select.appendChild(option);
+  renderHome();
+}
+
+function surveyLabel(hole, index) {
+  const label = hole.name.trim() || "Sem nome";
+  const shared = holes.filter((item) => (item.name.trim() || "Sem nome") === label).length;
+  return shared > 1 ? `${label} (${index + 1})` : label;
+}
+
+function holeFacts(hole) {
+  if (!hole.items.length) return null;
+  const intervals = accumulateIntervals(hole.items);
+  const last = intervals[intervals.length - 1];
+  if (!last) return null;
+  const pct = last.profundidadeFinalMm > 0
+    ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
+    : null;
+  return {
+    depth: formatMeters(last.profundidadeFinalMm),
+    recovery: formatMeters(last.recuperacaoFinalMm),
+    ratio: formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm),
+    pct,
+    boxes: boxesFor(intervals),
+  };
+}
+
+function ratioTone(pct) {
+  if (pct == null) return "";
+  if (pct < 70) return "is-bad";
+  if (pct < 90) return "is-warn";
+  return "";
+}
+
+function surveyFact(caption, value, tone) {
+  const cell = document.createElement("span");
+  cell.className = "survey-fact";
+  if (tone) cell.classList.add(tone);
+  const label = document.createElement("em");
+  label.textContent = caption;
+  cell.append(label, document.createTextNode(value));
+  return cell;
+}
+
+function holeTouchedAt(id) {
+  const list = loadHistory()[id];
+  if (!Array.isArray(list) || !list.length) return null;
+  const last = list[list.length - 1];
+  return last && typeof last.at === "number" ? last.at : null;
+}
+
+function showHome() {
+  if (logReady) persistHoles();
+  document.documentElement.classList.remove("resume-work");
+  document.body.classList.add("is-home");
+  const home = document.getElementById("home");
+  const layout = document.querySelector(".layout");
+  if (home) home.hidden = false;
+  if (layout) layout.hidden = true;
+  try {
+    sessionStorage.setItem("mmb-screen", "home");
+  } catch {
+    /* a tela segue na memória desta visita */
+  }
+  renderHome();
+}
+
+function showWorkspace() {
+  document.documentElement.classList.remove("resume-work");
+  document.body.classList.remove("is-home");
+  const home = document.getElementById("home");
+  const layout = document.querySelector(".layout");
+  if (home) home.hidden = true;
+  if (layout) layout.hidden = false;
+  try {
+    sessionStorage.setItem("mmb-screen", "work");
+  } catch {
+    /* a tela segue na memória desta visita */
+  }
+  requestAnimationFrame(() => layoutTaquinhoFaces());
+}
+
+function renderContinue(hole) {
+  const bar = document.getElementById("home-continue");
+  if (!bar) return;
+  const listed = hole && (hole.name.trim() || hole.items.length);
+  if (!listed) {
+    bar.hidden = true;
+    bar.replaceChildren();
+    return;
+  }
+  const facts = holeFacts(hole);
+  const copy = document.createElement("div");
+  copy.className = "continue-copy";
+  const title = document.createElement("strong");
+  title.textContent = hole.name.trim() || "Sem nome";
+  const detail = document.createElement("span");
+  if (facts) {
+    detail.append(document.createTextNode(`${facts.depth} perfurados · ${facts.recovery} recuperados · `));
+    const pct = document.createElement("b");
+    pct.textContent = facts.ratio;
+    const tone = ratioTone(facts.pct);
+    if (tone) pct.className = tone;
+    detail.append(pct, document.createTextNode(` · ${facts.boxes} ${facts.boxes === 1 ? "caixa" : "caixas"}`));
+  } else {
+    detail.textContent = "Ainda sem intervalos";
+  }
+  copy.append(title, detail);
+  const actions = document.createElement("div");
+  actions.className = "continue-actions";
+  const report = document.createElement("button");
+  report.type = "button";
+  report.className = "btn-quiet";
+  report.textContent = "Relatório";
+  report.disabled = !facts;
+  report.addEventListener("click", async () => {
+    await openHole(hole.id);
+    await printView("report");
   });
-  select.value = activeHoleId;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn";
+  button.textContent = "Continuar";
+  button.addEventListener("click", () => openHole(hole.id));
+  actions.append(report, button);
+  bar.hidden = false;
+  bar.replaceChildren(copy, actions);
+}
+
+function renderHome() {
+  const catalog = document.getElementById("home-catalog");
+  if (!catalog) return;
+  const query = (document.getElementById("home-search")?.value || "").trim().toLowerCase();
+  const onlyCore = Boolean(document.getElementById("home-with-core")?.checked);
+  const active = currentHole();
+  renderContinue(active);
+
+  const known = holes
+    .map((hole, index) => ({ hole, index, label: surveyLabel(hole, index) }))
+    .filter(({ hole }) => hole.name.trim() || hole.items.length);
+  const rows = known
+    .filter(({ label }) => !query || label.toLowerCase().includes(query))
+    .filter(({ hole }) => !onlyCore || hole.items.length > 0);
+  const count = document.getElementById("home-count");
+  if (count) {
+    count.replaceChildren();
+    if (!known.length) {
+      count.hidden = true;
+    } else {
+      count.hidden = false;
+      const strong = document.createElement("strong");
+      const caption = document.createElement("span");
+      const narrowed = Boolean(query) || onlyCore;
+      strong.textContent = String(narrowed ? rows.length : known.length);
+      caption.textContent = narrowed
+        ? (rows.length === 1 ? "furo nesta busca" : "furos nesta busca")
+        : (known.length === 1 ? "furo neste navegador" : "furos neste navegador");
+      count.append(strong, caption);
+    }
+  }
+
+  catalog.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "survey-empty";
+    empty.innerHTML = `<svg viewBox="0 0 48 28" aria-hidden="true"><rect x="1.5" y="1.5" width="45" height="25" rx="2"></rect><path d="M16.5 4.5v19M31.5 4.5v19"></path></svg>`;
+    const title = document.createElement("p");
+    const hint = document.createElement("p");
+    if (query || onlyCore) {
+      title.textContent = "Nenhuma sondagem corresponde a essa busca.";
+      hint.textContent = "Limpe o filtro para ver os furos deste navegador.";
+    } else {
+      title.textContent = "Nenhuma sondagem neste navegador.";
+      hint.textContent = "Crie um furo e lance o primeiro taquinho.";
+    }
+    empty.append(title, hint);
+    catalog.appendChild(empty);
+    return;
+  }
+
+  const head = document.createElement("div");
+  head.className = "survey-head";
+  for (const label of ["Furo", "Profundidade", "Recuperação", "Caixas", "Atualização", ""]) {
+    const cell = document.createElement("span");
+    cell.textContent = label;
+    head.appendChild(cell);
+  }
+  const list = document.createElement("ul");
+  list.className = "survey-list";
+  for (const row of rows) {
+    const item = document.createElement("li");
+    item.className = "survey-row";
+    if (row.hole.id === activeHoleId) item.classList.add("is-current");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "survey-open";
+    const name = document.createElement("span");
+    name.className = "survey-name";
+    const nameText = document.createElement("b");
+    nameText.textContent = row.label;
+    name.appendChild(nameText);
+    if (row.hole.id === activeHoleId) {
+      const badge = document.createElement("span");
+      badge.className = "survey-badge";
+      badge.textContent = "Aberto";
+      name.appendChild(badge);
+    }
+    const facts = holeFacts(row.hole);
+    const depth = surveyFact("Profundidade", facts ? facts.depth : "—", facts ? "" : "is-empty");
+    const recovery = surveyFact(
+      "Recuperação",
+      facts ? `${facts.recovery} · ${facts.ratio}` : "—",
+      facts ? ratioTone(facts.pct) : "is-empty",
+    );
+    const boxes = surveyFact("Caixas", facts ? String(facts.boxes) : "—", facts ? "" : "is-empty");
+    const touched = holeTouchedAt(row.hole.id);
+    const when = document.createElement("time");
+    when.className = "survey-when";
+    const whenLabel = document.createElement("em");
+    whenLabel.textContent = "Atualização";
+    when.appendChild(whenLabel);
+    if (touched) {
+      const date = new Date(touched);
+      when.dateTime = date.toISOString();
+      when.append(document.createTextNode(date.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })));
+    } else {
+      when.classList.add("is-empty");
+      when.append(document.createTextNode("—"));
+    }
+    open.append(name);
+    open.addEventListener("click", () => openHole(row.hole.id));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn-quiet survey-delete";
+    remove.textContent = "Excluir";
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteListedHole(row.hole.id);
+    });
+    item.addEventListener("click", () => openHole(row.hole.id));
+    item.append(open, depth, recovery, boxes, when, remove);
+    list.appendChild(item);
+  }
+  const table = document.createElement("div");
+  table.className = "survey-table";
+  table.append(head, list);
+  catalog.append(table);
 }
 
 function syncHoleInput() {
@@ -2402,33 +2870,597 @@ function loadHoles() {
 function clearListFilter() {
   const filter = document.getElementById("list-filter");
   if (filter) filter.value = "";
+  for (const id of ["filter-from", "filter-to"]) {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  }
 }
 
-function openHole(id) {
-  if (!id || id === activeHoleId) return;
-  persistHoles();
-  const next = holes.find((hole) => hole.id === id);
-  if (!next) return;
-  activeHoleId = next.id;
-  taquinhos = cloneItems(next.items);
-  undoStack.length = 0;
-  freshId = null;
-  selectedId = null;
-  focusedBox = null;
-  clearListFilter();
-  beginEdit(null);
-  clearConsulta();
-  syncHoleInput();
-  showNote(next.name.trim() ? `Furo ${next.name.trim()} aberto.` : "Furo sem nome aberto.");
+const HISTORY_KEY = "mmb-history";
+
+function loadHistory() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return raw;
+  } catch {
+    return {};
+  }
+}
+
+function rememberChange(label) {
+  if (!label || !activeHoleId || !logReady) return;
+  const all = loadHistory();
+  const list = Array.isArray(all[activeHoleId]) ? all[activeHoleId] : [];
+  list.push({ at: Date.now(), label: String(label).slice(0, 80) });
+  all[activeHoleId] = list.slice(-30);
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(all));
+  } catch {
+    /* o histórico é auxiliar; o furo continua salvo */
+  }
+  renderHistory();
+}
+
+function renderHistory() {
+  const box = document.getElementById("change-log");
+  const list = document.getElementById("change-list");
+  if (!box || !list) return;
+  const items = (Array.isArray(loadHistory()[activeHoleId]) ? loadHistory()[activeHoleId] : [])
+    .slice()
+    .reverse()
+    .slice(0, 8);
+  box.hidden = items.length === 0;
+  list.replaceChildren();
+  for (const item of items) {
+    if (!item || typeof item.at !== "number" || typeof item.label !== "string") continue;
+    const li = document.createElement("li");
+    const time = document.createElement("time");
+    const when = new Date(item.at);
+    time.dateTime = when.toISOString();
+    time.textContent = when.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    li.append(time, document.createTextNode(` ${item.label}`));
+    list.appendChild(li);
+  }
+}
+
+function usedChannels(intervals) {
+  let maxIndex = -1;
+  for (const interval of intervals) {
+    if (interval.recuperacaoMm <= 0) continue;
+    for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
+      maxIndex = Math.max(maxIndex, seg.channelIndex);
+    }
+  }
+  return maxIndex + 1;
+}
+
+function renderAudit(intervals) {
+  const list = document.getElementById("audit-list");
+  if (!list) return;
+  const issues = auditIntervals(intervals).filter((issue) => issue.level === "erro");
+  list.hidden = issues.length === 0;
+  list.replaceChildren();
+  for (const issue of issues) {
+    const li = document.createElement("li");
+    li.textContent = issue.text;
+    if (issue.id) {
+      li.tabIndex = 0;
+      li.addEventListener("click", () => revealInterval(issue.id, { zoom: false }));
+    }
+    list.appendChild(li);
+  }
+}
+
+function renderLithologyLegend(intervals) {
+  const legend = document.getElementById("lithology-legend");
+  if (!legend) return;
+  const seen = new Map();
+  for (const interval of intervals) {
+    const name = interval.geo?.litologia?.trim();
+    if (!name) continue;
+    seen.set(name, normalizeHex(interval.color));
+  }
+  legend.hidden = seen.size === 0;
+  legend.replaceChildren();
+  for (const [name, color] of seen) {
+    const li = document.createElement("li");
+    const swatch = document.createElement("i");
+    swatch.style.background = color;
+    li.append(swatch, document.createTextNode(name));
+    legend.appendChild(li);
+  }
+}
+
+function readGeoForm(form) {
+  return normalizeGeo({
+    litologia: form.litologia?.value,
+    alteracao: form.alteracao?.value,
+    fraturamento: form.fraturamento?.value,
+    mineralizacao: form.mineralizacao?.value,
+    observacoes: form.observacoes?.value,
+  });
+}
+
+function writeGeoForm(form, geo) {
+  const value = normalizeGeo(geo);
+  if (form.litologia) form.litologia.value = value.litologia;
+  if (form.alteracao) form.alteracao.value = value.alteracao;
+  if (form.fraturamento) form.fraturamento.value = value.fraturamento;
+  if (form.mineralizacao) form.mineralizacao.value = value.mineralizacao;
+  if (form.observacoes) form.observacoes.value = value.observacoes;
+}
+
+const GEO_FORM_KEY = "mmb-geo";
+
+function geoFormEnabled() {
+  try {
+    return localStorage.getItem(GEO_FORM_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function applyGeoForm() {
+  const on = geoFormEnabled();
+  const box = document.getElementById("geo-fields");
+  const button = document.getElementById("geo-toggle");
+  if (box) box.hidden = !on;
+  if (button) {
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.textContent = on ? "Desativar descrição geológica" : "Ativar descrição geológica";
+    button.classList.toggle("is-on", on);
+  }
+}
+
+function setGeoFormEnabled(on) {
+  try {
+    if (on) localStorage.setItem(GEO_FORM_KEY, "1");
+    else localStorage.removeItem(GEO_FORM_KEY);
+  } catch {
+    /* a preferência é auxiliar; o furo continua salvo */
+  }
+  applyGeoForm();
+}
+
+function measuresDirty() {
+  const form = document.getElementById("taquinho-form");
+  if (!(form instanceof HTMLFormElement)) return false;
+  return Boolean(String(form.avanco.value || "").trim() || String(form.recuperacao.value || "").trim());
+}
+
+function revealInterval(id, options = {}) {
+  const interval = currentIntervals().find((item) => item.id === id);
+  if (!interval) return;
+  selectedId = id;
+  const place = intervalBlock(interval);
+  if (place) focusedBox = place.box;
   renderAll();
+  if (place && options.zoom) {
+    const box = layout.boxes[place.box];
+    if (box) {
+      camera.zoom = 3;
+      camera.cx = box.ox + totalW / 2;
+      camera.cy = yFromBase(box.y0, place.topStart - place.slotStart + 1);
+      applyCamera();
+    }
+  } else if (place && !soloBox) {
+    const box = layout.boxes[place.box];
+    if (box) {
+      const size = fullSize();
+      camera.cx = box.ox + totalW / 2;
+      camera.cy = size.h / 2;
+      if (camera.zoom < 1.4) camera.zoom = Math.min(2.2, size.w / (totalW + BOX_GAP));
+      applyCamera();
+    }
+  }
+  document.querySelector(`#taquinho-list li[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
 }
 
-function createHole() {
+function stepInterval(delta) {
+  const intervals = currentIntervals();
+  if (!intervals.length) return;
+  const current = intervals.findIndex((item) => item.id === selectedId);
+  const index = current < 0 ? (delta < 0 ? intervals.length - 1 : 0) : current + delta;
+  const next = intervals[Math.min(intervals.length - 1, Math.max(0, index))];
+  if (next) revealInterval(next.id, { zoom: false });
+}
+
+function locateDepth(mm, resultId) {
+  const intervals = currentIntervals();
+  const last = intervals[intervals.length - 1];
+  const interval = findIntervalAtDepth(intervals, mm);
+  if (!interval) {
+    consulta = null;
+    renderConsulta();
+    showCalcResult(
+      resultId,
+      last
+        ? `Essa profundidade não está em nenhum intervalo. O furo lançado vai até ${formatMeters(last.profundidadeFinalMm)}.`
+        : "Ainda não há intervalos neste furo.",
+      true,
+    );
+    return;
+  }
+  if (interval.recuperacaoMm === 0) {
+    consulta = null;
+    selectedId = interval.id;
+    renderAll();
+    showCalcResult(
+      resultId,
+      `A profundidade ${formatMeters(mm)} cai no taquinho ${interval.index + 1} (${depthSpan(interval)}), sem testemunho recuperado. Não há posição física para destacar na caixa.`,
+      true,
+    );
+    return;
+  }
+  const tapeUm = tapeUmFromDepth(interval, mm);
+  const physicalUm = interval.physicalInicialMm * 1000 + tapeUm;
+  consulta = { depthUm: mm * 1000, tapeUm, physicalUm, intervalIndex: interval.index };
+  revealInterval(interval.id, { zoom: true });
+  const place = physicalPlace(physicalUm);
+  const estimate = interval.avancoMm !== interval.recuperacaoMm ? " A posição no testemunho é uma estimativa, porque houve perda." : "";
+  showCalcResult(
+    resultId,
+    `Taquinho ${interval.index + 1} (${depthSpan(interval)}), caixa ${place.box + 1}, canaleta ${place.channel + 1}, a ${formatCmUm(place.localUm)} da base.${estimate}`,
+    false,
+  );
+}
+
+function jumpTo(raw) {
+  const text = String(raw || "").trim().toLocaleLowerCase("pt-BR");
+  const intervals = currentIntervals();
+  if (!text) return;
+  if (!intervals.length) {
+    showCalcResult("jump-result", "Lance um intervalo antes de localizar.", true);
+    return;
+  }
+  const boxMatch = text.match(/caixa\s*(\d+)/);
+  const channelMatch = text.match(/canaleta\s*(\d+)/);
+  if (boxMatch || (channelMatch && !text.match(/\d+,\d+/) && !/taquinho/.test(text))) {
+    const boxIndex = boxMatch ? Number(boxMatch[1]) - 1 : focusedBox ?? 0;
+    const count = boxCount();
+    if (boxIndex < 0 || boxIndex >= count) {
+      showCalcResult("jump-result", `Não há caixa ${boxIndex + 1}. Este furo usa ${count} caixa(s).`, true);
+      return;
+    }
+    focusBox(boxIndex);
+    if (channelMatch) {
+      const channel = Number(channelMatch[1]) - 1;
+      const box = layout.boxes[boxIndex];
+      if (channel < 0 || channel > 2 || !box) {
+        showCalcResult("jump-result", "Cada caixa tem as canaletas 1, 2 e 3.", true);
+        return;
+      }
+      camera.zoom = Math.max(camera.zoom, 2.4);
+      camera.cx = box.channelX[channel] + CHANNEL_W / 2;
+      camera.cy = fullSize().h / 2;
+      applyCamera();
+      showCalcResult("jump-result", `Caixa ${boxIndex + 1}, canaleta ${channel + 1}.`, false);
+      return;
+    }
+    showCalcResult("jump-result", `Caixa ${boxIndex + 1}.`, false);
+    return;
+  }
+  const tagMatch = text.match(/taquinho\s*(\d+)/);
+  if (tagMatch) {
+    const interval = intervals[Number(tagMatch[1]) - 1];
+    if (!interval) {
+      showCalcResult("jump-result", "Esse taquinho não existe neste furo.", true);
+      return;
+    }
+    revealInterval(interval.id, { zoom: true });
+    const where = interval.recuperacaoMm > 0 ? "" : " Ele não tem testemunho na caixa.";
+    showCalcResult("jump-result", `Taquinho ${interval.index + 1}, ${depthSpan(interval)}.${where}`, interval.recuperacaoMm <= 0);
+    return;
+  }
+  const parsed = parseMetersToMm(text.replace(/m$/i, "").trim());
+  if (!parsed.ok) {
+    showCalcResult("jump-result", "Informe uma profundidade, como 12,50, ou escreva caixa 2 ou taquinho 4.", true);
+    return;
+  }
+  locateDepth(parsed.mm, "jump-result");
+}
+
+const PHOTO_DB = "pandora-photos";
+let thumbUrl = "";
+
+function photoKey(itemId, holeId = activeHoleId) {
+  return `${holeId}:${itemId}`;
+}
+
+function openPhotoDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(PHOTO_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("photos")) db.createObjectStore("photos");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPhoto(itemId) {
+  try {
+    const db = await openPhotoDb();
+    const record = await new Promise((resolve, reject) => {
+      const tx = db.transaction("photos", "readonly");
+      const request = tx.objectStore("photos").get(photoKey(itemId));
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return record && record.blob ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writePhoto(itemId, blob, note) {
+  const db = await openPhotoDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("photos", "readwrite");
+    tx.objectStore("photos").put({ blob, note: String(note || "").slice(0, 200), at: Date.now() }, photoKey(itemId));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function deletePhoto(itemId, holeId = activeHoleId) {
+  try {
+    const db = await openPhotoDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("photos", "readwrite");
+      tx.objectStore("photos").delete(photoKey(itemId, holeId));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* a foto é auxiliar; o intervalo segue sem ela */
+  }
+}
+
+async function deleteHolePhotos(holeId) {
+  try {
+    const db = await openPhotoDb();
+    const keys = await new Promise((resolve, reject) => {
+      const tx = db.transaction("photos", "readonly");
+      const request = tx.objectStore("photos").getAllKeys();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("photos", "readwrite");
+      const store = tx.objectStore("photos");
+      for (const key of keys) {
+        if (String(key).startsWith(`${holeId}:`)) store.delete(key);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* sem fotos para remover */
+  }
+}
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const max = 1400;
+      const scale = Math.min(1, max / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error("canvas"));
+        return;
+      }
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => {
+          URL.revokeObjectURL(url);
+          if (!blob) reject(new Error("foto"));
+          else resolve(blob);
+        },
+        "image/jpeg",
+        0.72,
+      );
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("foto"));
+    };
+    image.src = url;
+  });
+}
+
+function renderIntervalPanel() {
+  const panel = document.getElementById("interval-panel");
+  if (!panel) return;
+  const interval = currentIntervals().find((item) => item.id === selectedId);
+  if (!interval) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const title = document.getElementById("interval-panel-title");
+  if (title) title.textContent = `Taquinho ${interval.index + 1}`;
+  const body = document.getElementById("interval-panel-body");
+  if (body) {
+    body.replaceChildren();
+    const place = intervalBlock(interval);
+    const rows = [
+      ["Profundidade", depthSpan(interval)],
+      ["Avanço", formatMeters(interval.avancoMm)],
+      ["Recuperação", formatMeters(interval.recuperacaoMm)],
+      ["Percentual", formatRatio(interval.avancoMm, interval.recuperacaoMm)],
+      ["Na caixa", place ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}` : "Sem testemunho"],
+    ];
+    if (interval.geo?.litologia) rows.push(["Litologia", interval.geo.litologia]);
+    if (interval.geo?.alteracao) rows.push(["Alteração", interval.geo.alteracao]);
+    if (interval.geo?.fraturamento) rows.push(["Fraturamento", interval.geo.fraturamento]);
+    if (interval.geo?.mineralizacao) rows.push(["Mineralização", interval.geo.mineralizacao]);
+    if (interval.geo?.observacoes) rows.push(["Observações", interval.geo.observacoes]);
+    if (interval.info) rows.push(["Informação", interval.info]);
+    for (const [label, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      body.append(dt, dd);
+    }
+  }
+  loadPanelPhoto(interval.id);
+}
+
+async function loadPanelPhoto(itemId) {
+  const slot = document.getElementById("interval-photo");
+  if (!slot) return;
+  slot.replaceChildren();
+  const record = await readPhoto(itemId);
+  if (selectedId !== itemId) return;
+  if (!record) {
+    const empty = document.createElement("p");
+    empty.className = "photo-empty";
+    empty.textContent = "Nenhuma fotografia neste intervalo.";
+    slot.appendChild(empty);
+    return;
+  }
+  if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+  thumbUrl = URL.createObjectURL(record.blob);
+  const image = document.createElement("img");
+  image.src = thumbUrl;
+  image.alt = "Fotografia do intervalo";
+  image.addEventListener("click", () => openPhoto(itemId));
+  slot.appendChild(image);
+  if (record.note) {
+    const note = document.createElement("p");
+    note.textContent = record.note;
+    slot.appendChild(note);
+  }
+}
+
+async function openPhoto(itemId) {
+  const record = await readPhoto(itemId);
+  const dialog = document.getElementById("photo-dialog");
+  const image = document.getElementById("photo-full");
+  const note = document.getElementById("photo-note");
+  if (!record || !(dialog instanceof HTMLDialogElement) || !(image instanceof HTMLImageElement) || !(note instanceof HTMLTextAreaElement)) return;
+  const url = URL.createObjectURL(record.blob);
+  image.src = url;
+  note.value = record.note || "";
+  dialog.showModal();
+  let removed = false;
+  const finish = async () => {
+    if (!removed && note.value.trim() !== (record.note || "")) {
+      try {
+        await writePhoto(itemId, record.blob, note.value.trim());
+        rememberChange("Observação da fotografia atualizada");
+      } catch {
+        showError("Não foi possível guardar a observação da fotografia.");
+      }
+    }
+    URL.revokeObjectURL(url);
+    if (selectedId === itemId) loadPanelPhoto(itemId);
+  };
+  const remove = document.getElementById("photo-remove");
+  if (remove) {
+    remove.onclick = async (event) => {
+      event.preventDefault();
+      const ok = await askConfirm("Remover a fotografia deste intervalo?", "Remover");
+      if (!ok) return;
+      removed = true;
+      await deletePhoto(itemId);
+      rememberChange("Fotografia removida");
+      dialog.close();
+    };
+  }
+  dialog.addEventListener("close", () => {
+    if (remove) remove.onclick = null;
+    finish();
+  }, { once: true });
+}
+
+let photoTargetId = null;
+
+async function openIntervalPhoto(itemId) {
+  const record = await readPhoto(itemId);
+  if (record) {
+    openPhoto(itemId);
+    return;
+  }
+  photoTargetId = itemId;
+  document.getElementById("interval-photo-file")?.click();
+}
+
+async function attachPhoto(itemId, file) {
+  if (!file || !file.type.startsWith("image/")) {
+    showError("Escolha um arquivo de imagem.");
+    return;
+  }
+  try {
+    const blob = await compressImage(file);
+    const current = await readPhoto(itemId);
+    await writePhoto(itemId, blob, current?.note || "");
+    rememberChange("Fotografia anexada");
+    showNote("Fotografia guardada neste navegador, ligada a este intervalo.");
+    if (selectedId === itemId) loadPanelPhoto(itemId);
+  } catch {
+    showError("Não foi possível guardar a fotografia.");
+  }
+}
+
+async function confirmDiscardDraft() {
+  if (!measuresDirty() && !editingId) return true;
+  return askConfirm("Há valores no formulário que ainda não foram salvos. Continuar e descartá-los?", "Descartar");
+}
+
+async function openHole(id) {
+  if (!id) return;
+  if (id !== activeHoleId) {
+    if (!(await confirmDiscardDraft())) {
+      syncHoleInput();
+      return;
+    }
+    persistHoles();
+    const next = holes.find((hole) => hole.id === id);
+    if (!next) return;
+    activeHoleId = next.id;
+    taquinhos = cloneItems(next.items);
+    undoStack.length = 0;
+    freshId = null;
+    selectedId = null;
+    focusedBox = null;
+    clearListFilter();
+    beginEdit(null);
+    clearConsulta();
+    syncHoleInput();
+    showNote(next.name.trim() ? `Furo ${next.name.trim()} aberto.` : "Furo sem nome aberto.");
+    renderAll();
+  }
+  showWorkspace();
+}
+
+async function createHole() {
   const hole = currentHole();
   if (hole && !taquinhos.length && !hole.name.trim()) {
+    showWorkspace();
     document.getElementById("hole-id")?.focus();
     return;
   }
+  if (!(await confirmDiscardDraft())) return;
   persistHoles();
   const created = { id: crypto.randomUUID(), name: "", items: [] };
   holes.push(created);
@@ -2444,15 +3476,51 @@ function createHole() {
   syncHoleInput();
   showNote("Novo furo. Dê um nome e lance o primeiro taquinho.");
   renderAll();
+  showWorkspace();
   document.getElementById("hole-id")?.focus();
+}
+
+async function deleteListedHole(id) {
+  const hole = holes.find((item) => item.id === id);
+  if (!hole) return;
+  if (measuresDirty() || editingId) {
+    if (!(await confirmDiscardDraft())) return;
+    beginEdit(null);
+  }
+  const label = hole.name.trim() || "sem nome";
+  const ok = await askConfirm(`Excluir o furo ${label} e os taquinhos dele neste navegador?`, "Excluir");
+  if (!ok) return;
+  const removingActive = id === activeHoleId;
+  holes = holes.filter((item) => item.id !== id);
+  deleteHolePhotos(id);
+  if (!holes.length) holes.push({ id: crypto.randomUUID(), name: "", items: [] });
+  if (removingActive) {
+    activeHoleId = holes[0].id;
+    taquinhos = cloneItems(holes[0].items);
+    undoStack.length = 0;
+    freshId = null;
+    selectedId = null;
+    focusedBox = null;
+    clearListFilter();
+    beginEdit(null);
+    clearConsulta();
+  }
+  syncHoleInput();
+  persistHoles();
+  showNote("Furo excluído deste navegador.");
+  renderAll();
+  showHome();
 }
 
 async function deleteHole() {
   const hole = currentHole();
   const label = hole?.name.trim() || "sem nome";
+  if (!(await confirmDiscardDraft())) return;
   const ok = await askConfirm(`Excluir o furo ${label} e os taquinhos dele neste navegador?`, "Excluir");
   if (!ok) return;
-  holes = holes.filter((item) => item.id !== activeHoleId);
+  const removedId = activeHoleId;
+  holes = holes.filter((item) => item.id !== removedId);
+  deleteHolePhotos(removedId);
   if (!holes.length) holes.push({ id: crypto.randomUUID(), name: "", items: [] });
   activeHoleId = holes[0].id;
   taquinhos = cloneItems(holes[0].items);
@@ -2468,9 +3536,10 @@ async function deleteHole() {
   renderAll();
 }
 
-function snapshotLog() {
+function snapshotLog(label) {
   undoStack.push(JSON.stringify(serializeLog(taquinhos)));
   if (undoStack.length > 40) undoStack.shift();
+  if (label) rememberChange(label);
   syncLogActions();
 }
 
@@ -2482,6 +3551,7 @@ function undoLog() {
   freshId = null;
   taquinhos = sanitizeStored(JSON.parse(raw));
   clearConsulta();
+  rememberChange("Alteração desfeita");
   showNote("Alteração desfeita.");
   renderAll();
 }
@@ -2504,30 +3574,20 @@ function beginEdit(id) {
   form.avanco.value = metersLabel(item.avancoMm);
   form.recuperacao.value = metersLabel(item.recuperacaoMm);
   form.info.value = item.info || "";
+  writeGeoForm(form, item.geo);
   selectMaterialColor(item.color);
   if (heading) heading.textContent = `Editar taquinho ${taquinhos.indexOf(item) + 1}`;
   if (submit) submit.textContent = "Salvar taquinho";
   if (cancel) cancel.hidden = false;
   showError("");
-  showNote("");
+  showNote("Salvar recalcula a profundidade e a posição dos intervalos seguintes. O formulário guarda o que você já digitou até salvar ou cancelar.");
   renderAll();
   document.getElementById("form-title")?.scrollIntoView({ block: "nearest" });
   form.avanco.focus();
 }
 
 function showInterval(id) {
-  selectedId = id;
-  const interval = currentIntervals().find((item) => item.id === id);
-  const place = intervalBlock(interval);
-  focusedBox = place ? place.box : null;
-  renderAll();
-  const box = place ? layout.boxes[place.box] : null;
-  if (!box) return;
-  const localTop = place.topStart - place.slotStart;
-  camera.zoom = 3;
-  camera.cx = box.ox + totalW / 2;
-  camera.cy = yFromBase(box.y0, localTop + 1);
-  applyCamera();
+  revealInterval(id, { zoom: true });
 }
 
 function intervalLine(interval) {
@@ -2536,7 +3596,8 @@ function intervalLine(interval) {
   const inbox = interval.recuperacaoMm > 0
     ? `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`
     : "—";
-  return `${interval.index + 1}. P ${depthSpan(interval)} · A ${formatMeters(interval.avancoMm)} · R ${formatMeters(interval.recuperacaoMm)} · na caixa ${inbox} · ${where}${interval.info ? ` · ${interval.info}` : ""}`;
+  const geo = interval.geo?.litologia ? ` · ${interval.geo.litologia}` : "";
+  return `${interval.index + 1}. P ${depthSpan(interval)} · A ${formatMeters(interval.avancoMm)} · R ${formatMeters(interval.recuperacaoMm)} (${formatRatio(interval.avancoMm, interval.recuperacaoMm)}) · na caixa ${inbox} · ${where}${geo}${interval.info ? ` · ${interval.info}` : ""}`;
 }
 
 function reportText() {
@@ -2573,8 +3634,14 @@ function downloadTable() {
     "Na caixa",
     "Caixa",
     "Canaleta",
+    "Percentual",
     "Cor",
     "Informação",
+    "Litologia",
+    "Alteração",
+    "Fraturamento",
+    "Mineralização",
+    "Observações",
   ]];
   for (const interval of intervals) {
     const place = intervalBlock(interval);
@@ -2590,8 +3657,14 @@ function downloadTable() {
       inbox,
       place ? String(place.box + 1) : "",
       place ? String(place.channel + 1) : "",
+      formatRatio(interval.avancoMm, interval.recuperacaoMm),
       materialName(normalizeHex(interval.color)),
       interval.info || "",
+      interval.geo?.litologia || "",
+      interval.geo?.alteracao || "",
+      interval.geo?.fraturamento || "",
+      interval.geo?.mineralizacao || "",
+      interval.geo?.observacoes || "",
     ]);
   }
   const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(";")).join("\r\n")}`;
@@ -2627,7 +3700,7 @@ function downloadHole() {
   link.download = `${safe}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
-  showNote("Arquivo do furo gerado.");
+  showNote("Arquivo do furo gerado. Fotografias, se houver, continuam só neste navegador.");
 }
 
 function importHoleFile(file) {
@@ -2660,6 +3733,7 @@ function importHoleFile(file) {
       showError("");
       showNote(`Furo ${hole.name || "importado"} aberto a partir do arquivo.`);
       renderAll();
+      showWorkspace();
     } catch {
       showError("Não foi possível ler esse arquivo.");
     }
@@ -2670,7 +3744,7 @@ function importHoleFile(file) {
 function repeatLast() {
   const last = taquinhos[taquinhos.length - 1];
   if (!last || editingId) return;
-  snapshotLog();
+  snapshotLog("Intervalo repetido");
   const id = crypto.randomUUID();
   freshId = id;
   taquinhos.push({
@@ -2679,6 +3753,7 @@ function repeatLast() {
     recuperacaoMm: last.recuperacaoMm,
     info: last.info,
     color: last.color,
+    geo: normalizeGeo(last.geo),
   });
   clearConsulta();
   showNote("Último intervalo repetido.");
@@ -2691,7 +3766,7 @@ async function clearHole() {
   const label = currentHole()?.name.trim() || "sem nome";
   const ok = await askConfirm(`Apagar todos os taquinhos do furo ${label}? O furo continua salvo, vazio.`, "Apagar");
   if (!ok) return;
-  snapshotLog();
+  snapshotLog("Taquinhos apagados");
   taquinhos = [];
   freshId = null;
   selectedId = null;
@@ -2710,6 +3785,123 @@ async function copyReport() {
   } catch {
     showError("Não foi possível copiar o resumo.");
   }
+}
+
+async function fillPrintSheet(mode) {
+  const sheet = document.getElementById("print-sheet");
+  if (!sheet) return;
+  const intervals = currentIntervals();
+  const name = currentHole()?.name.trim() || "Sem nome";
+  const last = intervals[intervals.length - 1];
+  const boxIndex = focusedBox ?? 0;
+  const rows = intervals.filter((interval) => {
+    if (mode !== "sheet") return true;
+    if (interval.recuperacaoMm <= 0) return false;
+    return recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm).some((seg) => seg.box === boxIndex);
+  });
+  const title = mode === "sheet" ? `Ficha da caixa ${String(boxIndex + 1).padStart(2, "0")}` : "Relatório da sondagem";
+  const head = last
+    ? `Avanço ${formatMeters(last.profundidadeFinalMm)} · Recuperação ${formatMeters(last.recuperacaoFinalMm)} · ${formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm)} · ${boxCount()} caixa(s) · ${usedChannels(intervals)} canaleta(s)`
+    : "Nenhum intervalo lançado.";
+  sheet.replaceChildren();
+  const h1 = document.createElement("h1");
+  h1.textContent = `Pandora · ${name}`;
+  const h2 = document.createElement("h2");
+  h2.textContent = title;
+  const summary = document.createElement("p");
+  summary.textContent = head;
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>#</th><th>Profundidade</th><th>Avanço</th><th>Recuperação</th><th>%</th><th>Posição</th><th>Descrição</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  for (const interval of rows) {
+    const place = intervalBlock(interval);
+    const where = place ? `Caixa ${place.box + 1}, canaleta ${place.channel + 1}` : "Sem testemunho";
+    const geo = [
+      interval.geo?.litologia,
+      interval.geo?.alteracao ? `alteração ${interval.geo.alteracao}` : "",
+      interval.geo?.fraturamento ? `fraturamento ${interval.geo.fraturamento}` : "",
+      interval.geo?.mineralizacao,
+      interval.geo?.observacoes,
+      interval.info,
+    ].filter(Boolean).join(" · ");
+    const tr = document.createElement("tr");
+    for (const value of [
+      String(interval.index + 1),
+      depthSpan(interval),
+      formatMeters(interval.avancoMm),
+      formatMeters(interval.recuperacaoMm),
+      formatRatio(interval.avancoMm, interval.recuperacaoMm),
+      where,
+      geo,
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  sheet.append(h1, h2, summary, table);
+  const issues = auditIntervals(intervals).filter((issue) => issue.level === "erro");
+  if (issues.length) {
+    const issuesTitle = document.createElement("h2");
+    issuesTitle.textContent = "Inconsistências";
+    const list = document.createElement("ul");
+    for (const issue of issues) {
+      const li = document.createElement("li");
+      li.textContent = issue.text;
+      list.appendChild(li);
+    }
+    sheet.append(issuesTitle, list);
+  }
+  if (mode === "sheet") {
+    for (const interval of rows) {
+      const record = await readPhoto(interval.id);
+      if (!record) continue;
+      const figure = document.createElement("figure");
+      const image = document.createElement("img");
+      image.src = URL.createObjectURL(record.blob);
+      image.alt = `Fotografia do taquinho ${interval.index + 1}`;
+      const caption = document.createElement("figcaption");
+      caption.textContent = `Taquinho ${interval.index + 1}${record.note ? ` · ${record.note}` : ""}`;
+      figure.append(image, caption);
+      sheet.appendChild(figure);
+    }
+  }
+  const foot = document.createElement("p");
+  foot.className = "print-foot";
+  foot.textContent = "Para um PDF, escolha Salvar como PDF no destino da impressão. O zero da caixa fica na base e o testemunho sobe.";
+  sheet.appendChild(foot);
+}
+
+async function printView(mode) {
+  const previousSolo = soloBox;
+  const previousFocus = focusedBox;
+  document.body.dataset.print = mode;
+  if (mode === "one" || mode === "sheet") {
+    if (focusedBox == null) focusedBox = 0;
+    soloBox = true;
+    renderAll();
+    fitCamera();
+  }
+  if (mode === "report" || mode === "sheet") await fillPrintSheet(mode);
+  const done = () => {
+    window.removeEventListener("afterprint", done);
+    document.body.removeAttribute("data-print");
+    document.querySelectorAll("#print-sheet img").forEach((image) => {
+      if (image instanceof HTMLImageElement && image.src.startsWith("blob:")) URL.revokeObjectURL(image.src);
+    });
+    soloBox = previousSolo;
+    focusedBox = previousFocus;
+    renderAll();
+    const button = document.getElementById("view-solo");
+    if (button) {
+      button.textContent = soloBox ? "Todas as caixas" : "Uma caixa";
+      button.setAttribute("aria-pressed", soloBox ? "true" : "false");
+    }
+  };
+  window.addEventListener("afterprint", done);
+  window.print();
 }
 
 function bindHole() {
@@ -2731,12 +3923,23 @@ function bindHole() {
     refreshHoleSelect();
     persistHoles();
   });
-  document.getElementById("hole-list")?.addEventListener("change", (event) => {
-    const select = event.currentTarget;
-    if (select instanceof HTMLSelectElement) openHole(select.value);
-  });
   document.getElementById("hole-new")?.addEventListener("click", createHole);
   document.getElementById("hole-delete")?.addEventListener("click", deleteHole);
+  document.getElementById("home-open")?.addEventListener("click", () => showHome());
+  document.getElementById("home-search")?.addEventListener("input", () => renderHome());
+  document.getElementById("home-with-core")?.addEventListener("change", () => renderHome());
+  document.getElementById("home-import")?.addEventListener("click", () => {
+    document.getElementById("hole-file")?.click();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (!document.body.classList.contains("is-home")) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (document.querySelector("dialog[open]")) return;
+    event.preventDefault();
+    document.getElementById("home-search")?.focus();
+  });
   document.getElementById("repeat-last")?.addEventListener("click", repeatLast);
   document.getElementById("undo-log")?.addEventListener("click", undoLog);
   document.getElementById("copy-report")?.addEventListener("click", () => {
@@ -2744,6 +3947,18 @@ function bindHole() {
   });
   document.getElementById("download-hole")?.addEventListener("click", downloadHole);
   document.getElementById("download-table")?.addEventListener("click", downloadTable);
+  document.getElementById("print-hole")?.addEventListener("click", () => {
+    printView("boxes");
+  });
+  document.getElementById("print-one")?.addEventListener("click", () => {
+    printView("one");
+  });
+  document.getElementById("print-report")?.addEventListener("click", () => {
+    printView("report");
+  });
+  document.getElementById("print-sheet-btn")?.addEventListener("click", () => {
+    printView("sheet");
+  });
   document.getElementById("import-hole")?.addEventListener("click", () => {
     document.getElementById("hole-file")?.click();
   });
@@ -2755,6 +3970,8 @@ function bindHole() {
     if (file) importHoleFile(file);
   });
   document.getElementById("clear-hole")?.addEventListener("click", clearHole);
+  if (document.documentElement.classList.contains("resume-work")) showWorkspace();
+  else showHome();
   document.getElementById("edit-cancel")?.addEventListener("click", () => {
     const form = document.getElementById("taquinho-form");
     beginEdit(null);
@@ -2762,8 +3979,10 @@ function bindHole() {
       form.avanco.value = "";
       form.recuperacao.value = "";
       form.info.value = "";
+      writeGeoForm(form, {});
     }
     showNote("");
+    renderAll();
   });
   document.addEventListener("keydown", (event) => {
     if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z" || event.shiftKey) return;
@@ -2843,6 +4062,11 @@ function bindChrome() {
   document.getElementById("list-filter")?.addEventListener("input", () => {
     renderList(currentIntervals());
   });
+  for (const id of ["filter-from", "filter-to"]) {
+    document.getElementById(id)?.addEventListener("input", () => {
+      renderList(currentIntervals());
+    });
+  }
 
   const menu = document.getElementById("hole-menu");
   const more = document.getElementById("hole-menu-open");
@@ -2873,6 +4097,50 @@ function bindChrome() {
     if (!(target instanceof Element) || !target.closest("button")) return;
     closeHoleMenu();
   });
+
+  applyGeoForm();
+  document.getElementById("geo-toggle")?.addEventListener("click", () => {
+    setGeoFormEnabled(!geoFormEnabled());
+  });
+  document.getElementById("view-solo")?.addEventListener("click", () => {
+    soloBox = !soloBox;
+    const button = document.getElementById("view-solo");
+    if (button) {
+      button.textContent = soloBox ? "Todas as caixas" : "Uma caixa";
+      button.setAttribute("aria-pressed", soloBox ? "true" : "false");
+    }
+    if (soloBox && focusedBox == null) focusedBox = 0;
+    renderAll();
+    fitCamera();
+  });
+  document.getElementById("jump-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = document.getElementById("jump-query");
+    if (input instanceof HTMLInputElement) jumpTo(input.value);
+  });
+  document.getElementById("interval-close")?.addEventListener("click", () => {
+    selectedId = null;
+    renderAll();
+  });
+  document.getElementById("interval-edit")?.addEventListener("click", () => {
+    if (selectedId) beginEdit(selectedId);
+  });
+  document.getElementById("interval-prev")?.addEventListener("click", () => stepInterval(-1));
+  document.getElementById("interval-next")?.addEventListener("click", () => stepInterval(1));
+  document.getElementById("interval-photo-file")?.addEventListener("change", (event) => {
+    const input = event.currentTarget;
+    const itemId = photoTargetId;
+    photoTargetId = null;
+    if (!(input instanceof HTMLInputElement) || !itemId) return;
+    const file = input.files?.[0];
+    input.value = "";
+    if (file) attachPhoto(itemId, file);
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (!measuresDirty() && !editingId) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 }
 
 if (typeof document !== "undefined") {
@@ -2899,6 +4167,7 @@ if (typeof module !== "undefined" && module.exports) {
     accumulateIntervals,
     recoverySegments,
     placement,
+    yFromBase,
     formatMeters,
     roundCoreMm,
     findIntervalAtDepth,
@@ -2909,5 +4178,9 @@ if (typeof module !== "undefined" && module.exports) {
     formatMetersUm,
     formatCmUm,
     depthSpan,
+    meterSlices,
+    auditIntervals,
+    normalizeGeo,
+    geoIsEmpty,
   };
 }
