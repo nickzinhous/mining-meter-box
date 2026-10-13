@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=12" />
+    <link rel="stylesheet" href="styles.css?v=17" />
     <style>
       .login-screen {
         position: fixed;
@@ -19,7 +19,6 @@
         z-index: 40;
         display: grid;
         place-items: center;
-        background: #0f1115;
       }
       html.has-session .login-screen {
         display: none !important;
@@ -58,13 +57,19 @@
         </label>
         <label class="field">
           <span>Senha</span>
-          <input
-            name="senha"
-            type="password"
-            autocomplete="current-password"
-            maxlength="72"
-            required
-          />
+          <span class="password-wrap">
+            <input
+              id="login-password"
+              name="senha"
+              type="password"
+              autocomplete="current-password"
+              maxlength="72"
+              required
+            />
+            <button type="button" id="password-toggle" class="btn-quiet password-toggle" aria-pressed="false" aria-label="Mostrar senha">
+              Mostrar
+            </button>
+          </span>
         </label>
         <p id="login-error" class="form-error" hidden></p>
         <button id="login-submit" type="submit" class="btn">Entrar</button>
@@ -82,7 +87,7 @@
             <span class="help-tip" role="tooltip">
               O taquinho marca o fim da recuperação. O avanço guarda a profundidade
               perfurada. O testemunho entra pelo topo da canaleta. Cada caixa tem
-              três canaletas de 1&nbsp;m.
+              três canaletas de 1&nbsp;m. Cada furo fica salvo neste navegador.
             </span>
           </button>
         </div>
@@ -91,6 +96,24 @@
               <span>Furo</span>
               <input id="hole-id" type="text" maxlength="32" placeholder="F-001" autocomplete="off" />
             </label>
+            <select id="hole-list" class="hole-list" aria-label="Furos salvos"></select>
+            <div id="hole-menu" class="hole-menu">
+              <button type="button" id="hole-menu-open" class="btn-logout" aria-expanded="false" aria-controls="log-actions">
+                Ações
+              </button>
+              <div id="log-actions" class="hole-menu-panel" hidden>
+                <button type="button" id="repeat-last" class="btn-quiet" disabled>Repetir último</button>
+                <button type="button" id="undo-log" class="btn-quiet" disabled>Desfazer</button>
+                <button type="button" id="copy-report" class="btn-quiet" disabled>Copiar resumo</button>
+                <button type="button" id="download-hole" class="btn-quiet" disabled>Baixar furo</button>
+                <button type="button" id="download-table" class="btn-quiet" disabled>Baixar tabela</button>
+                <button type="button" id="import-hole" class="btn-quiet">Abrir arquivo</button>
+                <button type="button" id="clear-hole" class="btn-quiet" disabled>Limpar furo</button>
+                <input id="hole-file" type="file" accept="application/json,.json" hidden />
+              </div>
+            </div>
+            <button type="button" id="hole-new" class="btn-logout">Novo</button>
+            <button type="button" id="hole-delete" class="btn-logout">Excluir</button>
             <div class="appearance">
               <button type="button" id="theme-open" class="btn-logout" aria-expanded="false" aria-controls="theme-panel">
                 Aparência
@@ -129,7 +152,7 @@
               <path d="M8 2.5v11M3.5 8h9" />
               <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
             </svg>
-            Novo taquinho
+            <span id="form-heading">Novo taquinho</span>
           </h2>
           <form id="taquinho-form" class="form">
             <label class="field">
@@ -173,10 +196,21 @@
               </div>
               <input type="hidden" name="cor" value="#8d5a32" />
             </div>
-            <button type="submit" class="btn">Adicionar taquinho</button>
+            <button type="submit" id="taquinho-submit" class="btn">Adicionar taquinho</button>
+            <button type="button" id="edit-cancel" class="btn-quiet" hidden>Cancelar edição</button>
           </form>
           <p id="form-error" class="form-error" hidden></p>
           <p id="form-note" class="form-note" hidden></p>
+          <div id="hole-status" class="hole-status" hidden>
+            <p><span>Avanço</span><strong id="stat-advance"></strong></p>
+            <p><span>Recuperação</span><strong id="stat-recovery"></strong></p>
+            <p><span>Percentual</span><strong id="stat-ratio"></strong></p>
+            <p><span>Caixas</span><strong id="stat-boxes"></strong></p>
+            <div id="recovery-meter" class="recovery-meter" hidden>
+              <span id="recovery-fill"></span>
+            </div>
+          </div>
+          <p id="next-depth" class="next-depth">O primeiro intervalo começa em 0,00 m.</p>
           <p id="accum-summary" class="accum-summary" hidden></p>
           </section>
 
@@ -186,9 +220,20 @@
               <path d="M3 4.5h10M3 8h10M3 11.5h7" />
             </svg>
             Taquinhos
+            <span id="list-count" class="list-count"></span>
           </h2>
+          <label id="list-filter-field" class="field field--full list-filter" hidden>
+            <span>Filtrar</span>
+            <input
+              id="list-filter"
+              type="search"
+              placeholder="cor, informação ou profundidade"
+              autocomplete="off"
+            />
+          </label>
           <ul id="taquinho-list" class="taquinho-list"></ul>
-          <p id="list-empty" class="list-empty">Nenhum taquinho ainda.</p>
+          <p id="list-empty" class="list-empty">Nenhum taquinho neste furo. O que for lançado fica salvo neste navegador.</p>
+          <p id="list-miss" class="list-empty" hidden>Nenhum taquinho corresponde a esse filtro.</p>
           </section>
 
           <section class="side-block">
@@ -198,7 +243,11 @@
               <path d="M8 1.8v2.2M8 12v2.2M1.8 8h2.2M12 8h2.2" />
             </svg>
             Localizar profundidade
+            <button type="button" class="fold-btn" aria-expanded="true" aria-controls="locate-body" aria-label="Recolher localizar profundidade">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10.5 12 6.5" /></svg>
+            </button>
           </h2>
+          <div id="locate-body">
           <form id="locate-form" class="form">
             <label class="field field--full">
               <span>Profundidade desejada (m)</span>
@@ -214,6 +263,7 @@
             <button type="submit" class="btn">Calcular na trena</button>
           </form>
           <p id="locate-result" class="calc-result" hidden></p>
+          </div>
           </section>
 
           <section class="side-block">
@@ -222,7 +272,11 @@
               <path d="M2.5 11.5h11M4 11.5v-2M7 11.5V7.5M10 11.5V6M13 11.5V4.5" />
             </svg>
             Profundidade pela trena
+            <button type="button" class="fold-btn" aria-expanded="true" aria-controls="inverse-body" aria-label="Recolher profundidade pela trena">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5 8 10.5 12 6.5" /></svg>
+            </button>
           </h2>
+          <div id="inverse-body">
           <form id="inverse-form" class="form">
             <label class="field field--full">
               <span>Intervalo</span>
@@ -242,16 +296,22 @@
             <button type="submit" class="btn">Calcular profundidade</button>
           </form>
           <p id="inverse-result" class="calc-result" hidden></p>
+          </div>
           </section>
         </section>
 
         <section class="workspace" aria-label="Vista superior da caixa">
           <div class="box-wrap">
+            <div class="view-tools">
             <div class="zoom-bar">
-              <button type="button" id="zoom-out" aria-label="Diminuir zoom">−</button>
-              <button type="button" id="zoom-in" aria-label="Aumentar zoom">+</button>
-              <button type="button" id="zoom-reset">Ver tudo</button>
+              <button type="button" id="zoom-out" aria-label="Diminuir zoom" title="Atalho: −">−</button>
+              <button type="button" id="zoom-in" aria-label="Aumentar zoom" title="Atalho: +">+</button>
+              <button type="button" id="zoom-reset" title="Atalho: 0">Ver tudo</button>
               <span id="zoom-label">100%</span>
+              <button type="button" id="tray-expand" aria-pressed="false">Ampliar</button>
+              <button type="button" id="shortcuts-open">Atalhos</button>
+            </div>
+            <div id="box-rail" class="box-rail" role="toolbar" aria-label="Caixas" hidden></div>
             </div>
             <div class="tray-stage">
             <svg
@@ -277,11 +337,41 @@
             </div>
 
             <p class="scale scale--width">O zero fica no topo. Passe o mouse no testemunho para ver a profundidade. Aproxime com + e −, ou com a roda do mouse.</p>
+            <ul class="legend">
+              <li><i class="legend-swatch legend-swatch--channel" aria-hidden="true"></i>Canaleta</li>
+              <li><i class="legend-swatch legend-swatch--tag" aria-hidden="true"></i>Taquinho</li>
+              <li><i class="legend-swatch legend-swatch--mark" aria-hidden="true"></i>Profundidade</li>
+            </ul>
           </div>
         </section>
       </div>
     </main>
     <div id="probe-tip" class="probe-tip" hidden></div>
-    <script src="app.js?v=13"></script>
+    <dialog id="confirm-dialog" class="sheet">
+      <form method="dialog" class="sheet-card">
+        <h2>Confirmar</h2>
+        <p id="confirm-message"></p>
+        <div class="sheet-actions">
+          <button value="cancel" class="btn-quiet">Cancelar</button>
+          <button id="confirm-ok" value="ok" class="btn">Confirmar</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="shortcuts-dialog" class="sheet">
+      <form method="dialog" class="sheet-card">
+        <h2>Atalhos</h2>
+        <ul class="shortcut-list">
+          <li>Aumentar o zoom <kbd>+</kbd></li>
+          <li>Diminuir o zoom <kbd>−</kbd></li>
+          <li>Ver a caixa inteira <kbd>0</kbd></li>
+          <li>Desfazer o último lançamento <kbd>Ctrl Z</kbd></li>
+          <li>Soltar a marcação <kbd>Esc</kbd></li>
+        </ul>
+        <div class="sheet-actions">
+          <button value="close" class="btn">Fechar</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="app.js?v=18"></script>
   </body>
 </html>

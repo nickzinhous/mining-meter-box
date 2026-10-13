@@ -49,6 +49,8 @@ const layout = {
 };
 
 let freshId = null;
+let selectedId = null;
+let editingId = null;
 /** @type {null | Record<string, any>} */
 let probePin = null;
 
@@ -619,7 +621,7 @@ function renderCores(intervals) {
       const absEnd = seg.channelIndex * LENGTH * MM + seg.localEndMm;
       root.appendChild(
         el("rect", {
-          class: "core",
+          class: interval.id === selectedId ? "core is-picked" : "core",
           "data-id": interval.id,
           "data-length-mm": seg.lengthMm,
           "data-abs-start-mm": absStart,
@@ -678,7 +680,7 @@ function renderTaquinhos(intervals) {
     ];
 
     const g = el("g", {
-      class: "taquinho",
+      class: t.id === selectedId ? "taquinho is-picked" : "taquinho",
       "data-id": t.id,
       "data-label": lines.join("|"),
       "pointer-events": "none",
@@ -728,18 +730,47 @@ function formatCm(n) {
   return Number.isInteger(n) ? `${n} cm` : `${n.toFixed(1)} cm`;
 }
 
+function listQuery() {
+  return (document.getElementById("list-filter")?.value || "").trim().toLocaleLowerCase("pt-BR");
+}
+
+function intervalSearchText(interval) {
+  const place = intervalBlock(interval);
+  const where = place ? `caixa ${place.box + 1} canaleta ${place.channel + 1}` : "";
+  return [
+    String(interval.index + 1),
+    materialName(normalizeHex(interval.color)),
+    interval.info || "",
+    depthSpan(interval),
+    formatMeters(interval.avancoMm),
+    formatMeters(interval.recuperacaoMm),
+    where,
+  ]
+    .join(" ")
+    .toLocaleLowerCase("pt-BR");
+}
+
 function renderList(intervals) {
   const list = document.getElementById("taquinho-list");
   const empty = document.getElementById("list-empty");
+  const miss = document.getElementById("list-miss");
   const summary = document.getElementById("accum-summary");
+  const filterField = document.getElementById("list-filter-field");
+  const count = document.getElementById("list-count");
   if (!list || !empty) return;
 
+  const query = listQuery();
+  if (filterField) filterField.hidden = intervals.length === 0;
   list.replaceChildren();
+  let shown = 0;
 
   for (const t of intervals) {
+    if (query && !intervalSearchText(t).includes(query)) continue;
+    shown += 1;
     const li = document.createElement("li");
     li.dataset.id = t.id;
     if (t.id === freshId) li.classList.add("is-fresh");
+    if (t.id === selectedId || t.id === editingId) li.classList.add("is-picked");
     const color = normalizeHex(t.color);
     li.style.borderLeftColor = color;
     const hasCore = t.recuperacaoMm > 0;
@@ -770,31 +801,55 @@ function renderList(intervals) {
         }
         ${t.info ? `<p class="card-info">${escapeHtml(t.info)}</p>` : ""}
       </div>`;
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn-quiet";
+    editBtn.textContent = "Editar";
+    editBtn.addEventListener("click", () => beginEdit(t.id));
+    actions.appendChild(editBtn);
+    if (hasCore) {
+      const viewBtn = document.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.className = "btn-quiet";
+      viewBtn.textContent = "Ver";
+      viewBtn.addEventListener("click", () => showInterval(t.id));
+      actions.appendChild(viewBtn);
+    }
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn-quiet";
+    copyBtn.textContent = "Copiar";
+    copyBtn.addEventListener("click", () => {
+      copyIntervalLine(t);
+    });
+    actions.appendChild(copyBtn);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn-remove";
     btn.textContent = "Remover";
     btn.addEventListener("click", () => {
+      snapshotLog();
+      if (editingId === t.id) beginEdit(null);
+      if (selectedId === t.id) selectedId = null;
       taquinhos = taquinhos.filter((x) => x.id !== t.id);
       clearConsulta();
       showNote("");
       renderAll();
     });
-    li.appendChild(btn);
+    actions.appendChild(btn);
+    li.appendChild(actions);
     list.appendChild(li);
   }
 
   empty.hidden = intervals.length > 0;
-  if (summary) {
-    const last = intervals[intervals.length - 1];
-    if (!last) {
-      summary.hidden = true;
-      summary.textContent = "";
-    } else {
-      summary.hidden = false;
-      summary.textContent = `Avanço acumulado ${formatMeters(last.profundidadeFinalMm)} · Recuperação acumulada ${formatMeters(last.recuperacaoFinalMm)}`;
-    }
+  if (miss) miss.hidden = !(intervals.length > 0 && shown === 0);
+  if (count) {
+    count.textContent = !intervals.length ? "" : query ? `${shown} de ${intervals.length}` : String(intervals.length);
   }
+  if (summary) summary.hidden = true;
+  renderHoleStatus(intervals);
 }
 
 function renderIntervalOptions(intervals) {
@@ -864,6 +919,8 @@ function renderAll() {
     hideProbeTip();
     clearProbeDrawing();
   }
+  if (selectedId && !taquinhos.some((item) => item.id === selectedId)) selectedId = null;
+  persistHoles();
   const intervals = currentIntervals();
   renderList(intervals);
   renderIntervalOptions(intervals);
@@ -871,6 +928,7 @@ function renderAll() {
   renderCores(intervals);
   renderTaquinhos(intervals);
   renderConsulta();
+  renderBoxRail();
 }
 
 function clearConsulta() {
@@ -956,22 +1014,42 @@ function bindForm() {
     }
 
     const registeredRecovery = roundCoreMm(recuperacao.mm);
-    const id = crypto.randomUUID();
-    freshId = id;
-    taquinhos.push({
-      id,
-      avancoMm: avanco.mm,
-      recuperacaoMm: registeredRecovery,
-      info,
-      color: normalizeHex(data.get("cor")),
-    });
-
-    clearConsulta();
-    showNote(
+    const color = normalizeHex(data.get("cor"));
+    const roundingNote =
       registeredRecovery === recuperacao.mm
         ? ""
-        : `Recuperação registrada como ${formatMeters(registeredRecovery)} (ajuste para múltiplo de 5 cm).`,
-    );
+        : `Recuperação registrada como ${formatMeters(registeredRecovery)} (ajuste para múltiplo de 5 cm).`;
+
+    if (editingId) {
+      const current = taquinhos.find((item) => item.id === editingId);
+      if (!current) {
+        beginEdit(null);
+        showError("Esse taquinho não está mais neste furo.");
+        return;
+      }
+      snapshotLog();
+      current.avancoMm = avanco.mm;
+      current.recuperacaoMm = registeredRecovery;
+      current.info = info;
+      current.color = color;
+      freshId = current.id;
+      beginEdit(null);
+      showNote(roundingNote || "Taquinho atualizado.");
+    } else {
+      snapshotLog();
+      const id = crypto.randomUUID();
+      freshId = id;
+      taquinhos.push({
+        id,
+        avancoMm: avanco.mm,
+        recuperacaoMm: registeredRecovery,
+        info,
+        color,
+      });
+      showNote(roundingNote);
+    }
+
+    clearConsulta();
     renderAll();
     document.querySelector("#taquinho-list li.is-fresh")?.scrollIntoView({ block: "nearest" });
     form.avanco.value = "";
@@ -1030,7 +1108,7 @@ function bindLocate() {
     const place = physicalPlace(physicalUm);
     showCalcResult(
       "locate-result",
-      `No taquinho ${interval.index + 1} (${formatMeters(interval.profundidadeInicialMm)}–${formatMeters(interval.profundidadeFinalMm)}), a profundidade ${formatMeters(parsed.mm)} fica a ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} da base.`,
+      `No taquinho ${interval.index + 1} (${formatMeters(interval.profundidadeInicialMm)}–${formatMeters(interval.profundidadeFinalMm)}), a profundidade ${formatMeters(parsed.mm)} fica a ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} do topo.`,
       false,
     );
     renderConsulta();
@@ -1093,7 +1171,7 @@ function bindInverse() {
     const place = physicalPlace(physicalUm);
     showCalcResult(
       "inverse-result",
-      `A ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho do taquinho ${interval.index + 1}, a profundidade é ${formatMetersUm(depthUm)}. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} da base.`,
+      `A ${formatMetersUm(tapeUm)} (${formatCmUm(tapeUm)}) do início do testemunho do taquinho ${interval.index + 1}, a profundidade é ${formatMetersUm(depthUm)}. Na caixa: canaleta ${place.channel + 1} da caixa ${place.box + 1}, a ${formatCmUm(place.localUm)} do topo.`,
       false,
     );
     renderConsulta();
@@ -1105,6 +1183,62 @@ const camera = {
   cx: 0,
   cy: 0,
 };
+let focusedBox = null;
+
+function renderBoxRail() {
+  const rail = document.getElementById("box-rail");
+  if (!rail) return;
+  const count = layout.boxes.length;
+  rail.hidden = count < 2;
+  rail.replaceChildren();
+  if (count < 2) {
+    focusedBox = null;
+    return;
+  }
+  if (focusedBox != null && focusedBox >= count) focusedBox = null;
+  for (let index = 0; index < count; index += 1) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.box = String(index);
+    button.textContent = String(index + 1).padStart(2, "0");
+    button.setAttribute("aria-label", `Ver caixa ${index + 1}`);
+    const on = focusedBox === index;
+    button.classList.toggle("is-current", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.addEventListener("click", () => focusBox(index));
+    rail.appendChild(button);
+  }
+}
+
+function focusBox(index) {
+  const box = layout.boxes[index];
+  if (!box) return;
+  focusedBox = index;
+  const size = fullSize();
+  const fit = Math.min(3.2, Math.max(1, size.w / (totalW + BOX_GAP)));
+  camera.zoom = Math.max(camera.zoom, fit);
+  camera.cx = box.ox + totalW / 2;
+  camera.cy = size.h / 2;
+  applyCamera();
+  document.querySelectorAll("#box-rail button").forEach((button) => {
+    const on = Number(button.dataset.box) === index;
+    button.classList.toggle("is-current", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function resetCamera() {
+  const size = fullSize();
+  focusedBox = null;
+  camera.zoom = 1;
+  camera.cx = size.w / 2;
+  camera.cy = size.h / 2;
+  applyCamera();
+  document.querySelectorAll("#box-rail button").forEach((button) => {
+    button.classList.remove("is-current");
+    button.setAttribute("aria-pressed", "false");
+  });
+}
 
 function fullSize() {
   const n = boxCount();
@@ -1210,11 +1344,27 @@ function bindZoom() {
     setZoom(camera.zoom / 1.25, { x: camera.cx, y: camera.cy });
   });
   document.getElementById("zoom-reset")?.addEventListener("click", () => {
-    const size = fullSize();
-    camera.zoom = 1;
-    camera.cx = size.w / 2;
-    camera.cy = size.h / 2;
-    applyCamera();
+    resetCamera();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (document.querySelector("dialog[open]")) return;
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      setZoom(camera.zoom * 1.25, { x: camera.cx, y: camera.cy });
+    } else if (event.key === "-" || event.key === "_") {
+      event.preventDefault();
+      setZoom(camera.zoom / 1.25, { x: camera.cx, y: camera.cy });
+    } else if (event.key === "0") {
+      event.preventDefault();
+      resetCamera();
+    } else if (event.key === "?") {
+      event.preventDefault();
+      document.getElementById("shortcuts-dialog")?.showModal();
+    }
   });
 }
 
@@ -1904,7 +2054,18 @@ function paintTheme(element, colors) {
   set("--tick", accent);
   set("--tag-bg", mixHex(bg, text, 0.1));
   set("--core-seam", rgba(inkFor(channel), 0.55));
-  set("--shadow", "0 18px 40px rgba(0, 0, 0, 0.28)");
+  const lightUi = channelLuma(bg) > 0.45;
+  const surface = mixHex(bg, text, 0.075);
+  set("--amber", lightUi ? "#9a5410" : "#f5b942");
+  set("--danger", lightUi ? "#b42318" : "#f0a3a8");
+  set("--card", lightUi ? mixHex(bg, "#ffffff", 0.45) : mixHex(bg, surface, 0.72));
+  set("--card-hover", lightUi ? mixHex(bg, text, 0.06) : mixHex(bg, text, 0.11));
+  set("--input-bg", lightUi ? mixHex(bg, "#ffffff", 0.72) : mixHex(surface, "#000000", 0.28));
+  set("--input-bg-focus", lightUi ? "#ffffff" : mixHex(surface, "#000000", 0.42));
+  set("--placeholder", mixHex(bg, text, 0.48));
+  set("--hairline", rgba(text, lightUi ? 0.18 : 0.22));
+  set("--shadow", lightUi ? "0 16px 34px rgba(28, 24, 18, 0.12)" : "0 18px 40px rgba(0, 0, 0, 0.32)");
+  element.style.colorScheme = lightUi ? "light" : "dark";
 }
 
 function themeFromColors(paletteId, colors) {
@@ -2049,6 +2210,8 @@ function bindTheme() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (!document.querySelector("dialog[open]")) closeHoleMenu();
+    if (document.querySelector(".workspace.is-wide")) setTrayExpanded(false);
     probePin = null;
     clearHover();
     if (!panel.hidden) {
@@ -2058,16 +2221,657 @@ function bindTheme() {
   });
 }
 
-function bindHole() {
-  const input = document.getElementById("hole-id");
-  if (!input) return;
-  try {
-    input.value = localStorage.getItem(HOLE_KEY) || "";
-  } catch {
-    input.value = "";
+const LOG_KEY = "mmb-log";
+let holes = [];
+let activeHoleId = "";
+let logReady = false;
+const undoStack = [];
+
+function currentHole() {
+  return holes.find((hole) => hole.id === activeHoleId) || null;
+}
+
+function serializeLog(items) {
+  return items.map((item) => ({
+    id: item.id,
+    avancoMm: item.avancoMm,
+    recuperacaoMm: item.recuperacaoMm,
+    info: item.info || "",
+    color: normalizeHex(item.color),
+  }));
+}
+
+function sanitizeStored(items) {
+  if (!Array.isArray(items)) return [];
+  const stored = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const avancoMm = Number(item.avancoMm);
+    const recuperacaoMm = Number(item.recuperacaoMm);
+    if (!Number.isSafeInteger(avancoMm) || avancoMm <= 0) continue;
+    if (!Number.isSafeInteger(recuperacaoMm) || recuperacaoMm < 0) continue;
+    stored.push({
+      id: typeof item.id === "string" && item.id ? item.id : crypto.randomUUID(),
+      avancoMm,
+      recuperacaoMm,
+      info: String(item.info || "").slice(0, 80),
+      color: normalizeHex(item.color),
+    });
   }
-  input.addEventListener("input", () => {
-    localStorage.setItem(HOLE_KEY, input.value);
+  return stored;
+}
+
+function sanitizeHole(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : crypto.randomUUID(),
+    name: String(raw.name || "").slice(0, 32),
+    items: sanitizeStored(raw.items),
+  };
+}
+
+function cloneItems(items) {
+  return sanitizeStored(items).map((item) => ({ ...item }));
+}
+
+function formatRatio(advanceMm, recoveryMm) {
+  if (advanceMm <= 0) return "—";
+  const pct = Math.round((recoveryMm / advanceMm) * 1000) / 10;
+  return `${String(pct).replace(".", ",")}%`;
+}
+
+function renderHoleStatus(intervals) {
+  const status = document.getElementById("hole-status");
+  const next = document.getElementById("next-depth");
+  const last = intervals[intervals.length - 1];
+  if (status) {
+    status.hidden = !last;
+    if (last) {
+      const advance = document.getElementById("stat-advance");
+      const recovery = document.getElementById("stat-recovery");
+      const ratio = document.getElementById("stat-ratio");
+      const boxes = document.getElementById("stat-boxes");
+      if (advance) advance.textContent = formatMeters(last.profundidadeFinalMm);
+      if (recovery) recovery.textContent = formatMeters(last.recuperacaoFinalMm);
+      if (ratio) ratio.textContent = formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm);
+      if (boxes) boxes.textContent = String(boxCount());
+      const pct = last.profundidadeFinalMm > 0
+        ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
+        : null;
+      if (ratio) {
+        ratio.classList.toggle("is-bad", pct != null && pct < 70);
+        ratio.classList.toggle("is-warn", pct != null && pct >= 70 && pct < 90);
+      }
+      const meter = document.getElementById("recovery-meter");
+      const fill = document.getElementById("recovery-fill");
+      if (meter && fill) {
+        meter.hidden = pct == null;
+        meter.classList.toggle("is-bad", pct != null && pct < 70);
+        meter.classList.toggle("is-warn", pct != null && pct >= 70 && pct < 90);
+        if (pct != null) {
+          fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+          meter.title = `Recuperação ${String(pct).replace(".", ",")}% do avanço`;
+        }
+      }
+    }
+  }
+  if (next) {
+    next.textContent = last
+      ? `Próximo intervalo começa em ${formatMeters(last.profundidadeFinalMm)}.`
+      : "O primeiro intervalo começa em 0,00 m.";
+  }
+  syncLogActions();
+}
+
+function syncLogActions() {
+  const hasItems = taquinhos.length > 0;
+  const repeat = document.getElementById("repeat-last");
+  const undo = document.getElementById("undo-log");
+  const copy = document.getElementById("copy-report");
+  const download = document.getElementById("download-hole");
+  const table = document.getElementById("download-table");
+  const clear = document.getElementById("clear-hole");
+  if (repeat) repeat.disabled = !hasItems || Boolean(editingId);
+  if (undo) undo.disabled = undoStack.length === 0;
+  if (copy) copy.disabled = !hasItems;
+  if (download) download.disabled = !hasItems;
+  if (table) table.disabled = !hasItems;
+  if (clear) clear.disabled = !hasItems;
+}
+
+function refreshHoleSelect() {
+  const select = document.getElementById("hole-list");
+  if (!select) return;
+  const labels = holes.map((hole) => hole.name.trim() || "Sem nome");
+  select.replaceChildren();
+  holes.forEach((hole, index) => {
+    const option = document.createElement("option");
+    option.value = hole.id;
+    const label = hole.name.trim() || "Sem nome";
+    option.textContent = labels.filter((item) => item === label).length > 1 ? `${label} (${index + 1})` : label;
+    select.appendChild(option);
+  });
+  select.value = activeHoleId;
+}
+
+function syncHoleInput() {
+  const input = document.getElementById("hole-id");
+  const hole = currentHole();
+  if (input && hole && input.value !== hole.name) input.value = hole.name;
+  refreshHoleSelect();
+}
+
+function persistHoles() {
+  if (!logReady) return;
+  const hole = currentHole();
+  const input = document.getElementById("hole-id");
+  if (hole) {
+    if (input && document.activeElement !== input) hole.name = input.value.trim();
+    hole.items = serializeLog(taquinhos);
+  }
+  localStorage.setItem(LOG_KEY, JSON.stringify({ version: 1, activeId: activeHoleId, holes }));
+  localStorage.setItem(HOLE_KEY, hole?.name || "");
+}
+
+function loadHoles() {
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(LOG_KEY) || "null");
+  } catch {
+    stored = null;
+  }
+  if (stored && Array.isArray(stored.holes)) {
+    holes = stored.holes.map(sanitizeHole).filter(Boolean);
+    activeHoleId = holes.some((hole) => hole.id === stored.activeId) ? stored.activeId : holes[0]?.id || "";
+  }
+  if (!holes.length) {
+    let name = "";
+    try {
+      name = localStorage.getItem(HOLE_KEY) || "";
+    } catch {
+      name = "";
+    }
+    const hole = { id: crypto.randomUUID(), name, items: [] };
+    holes = [hole];
+    activeHoleId = hole.id;
+  }
+  taquinhos = cloneItems(currentHole()?.items || []);
+  logReady = true;
+}
+
+function clearListFilter() {
+  const filter = document.getElementById("list-filter");
+  if (filter) filter.value = "";
+}
+
+function openHole(id) {
+  if (!id || id === activeHoleId) return;
+  persistHoles();
+  const next = holes.find((hole) => hole.id === id);
+  if (!next) return;
+  activeHoleId = next.id;
+  taquinhos = cloneItems(next.items);
+  undoStack.length = 0;
+  freshId = null;
+  selectedId = null;
+  focusedBox = null;
+  clearListFilter();
+  beginEdit(null);
+  clearConsulta();
+  syncHoleInput();
+  showNote(next.name.trim() ? `Furo ${next.name.trim()} aberto.` : "Furo sem nome aberto.");
+  renderAll();
+}
+
+function createHole() {
+  const hole = currentHole();
+  if (hole && !taquinhos.length && !hole.name.trim()) {
+    document.getElementById("hole-id")?.focus();
+    return;
+  }
+  persistHoles();
+  const created = { id: crypto.randomUUID(), name: "", items: [] };
+  holes.push(created);
+  activeHoleId = created.id;
+  taquinhos = [];
+  undoStack.length = 0;
+  freshId = null;
+  selectedId = null;
+  focusedBox = null;
+  clearListFilter();
+  beginEdit(null);
+  clearConsulta();
+  syncHoleInput();
+  showNote("Novo furo. Dê um nome e lance o primeiro taquinho.");
+  renderAll();
+  document.getElementById("hole-id")?.focus();
+}
+
+async function deleteHole() {
+  const hole = currentHole();
+  const label = hole?.name.trim() || "sem nome";
+  const ok = await askConfirm(`Excluir o furo ${label} e os taquinhos dele neste navegador?`, "Excluir");
+  if (!ok) return;
+  holes = holes.filter((item) => item.id !== activeHoleId);
+  if (!holes.length) holes.push({ id: crypto.randomUUID(), name: "", items: [] });
+  activeHoleId = holes[0].id;
+  taquinhos = cloneItems(holes[0].items);
+  undoStack.length = 0;
+  freshId = null;
+  selectedId = null;
+  focusedBox = null;
+  clearListFilter();
+  beginEdit(null);
+  clearConsulta();
+  syncHoleInput();
+  showNote("Furo excluído deste navegador.");
+  renderAll();
+}
+
+function snapshotLog() {
+  undoStack.push(JSON.stringify(serializeLog(taquinhos)));
+  if (undoStack.length > 40) undoStack.shift();
+  syncLogActions();
+}
+
+function undoLog() {
+  const raw = undoStack.pop();
+  if (!raw) return;
+  beginEdit(null);
+  selectedId = null;
+  freshId = null;
+  taquinhos = sanitizeStored(JSON.parse(raw));
+  clearConsulta();
+  showNote("Alteração desfeita.");
+  renderAll();
+}
+
+function beginEdit(id) {
+  const form = document.getElementById("taquinho-form");
+  const heading = document.getElementById("form-heading");
+  const submit = document.getElementById("taquinho-submit");
+  const cancel = document.getElementById("edit-cancel");
+  const item = id ? taquinhos.find((entry) => entry.id === id) : null;
+  editingId = item ? item.id : null;
+  if (!form || !item) {
+    editingId = null;
+    if (heading) heading.textContent = "Novo taquinho";
+    if (submit) submit.textContent = "Adicionar taquinho";
+    if (cancel) cancel.hidden = true;
+    syncLogActions();
+    return;
+  }
+  form.avanco.value = metersLabel(item.avancoMm);
+  form.recuperacao.value = metersLabel(item.recuperacaoMm);
+  form.info.value = item.info || "";
+  selectMaterialColor(item.color);
+  if (heading) heading.textContent = `Editar taquinho ${taquinhos.indexOf(item) + 1}`;
+  if (submit) submit.textContent = "Salvar taquinho";
+  if (cancel) cancel.hidden = false;
+  showError("");
+  showNote("");
+  renderAll();
+  document.getElementById("form-title")?.scrollIntoView({ block: "nearest" });
+  form.avanco.focus();
+}
+
+function showInterval(id) {
+  selectedId = id;
+  const interval = currentIntervals().find((item) => item.id === id);
+  const place = intervalBlock(interval);
+  focusedBox = place ? place.box : null;
+  renderAll();
+  const box = place ? layout.boxes[place.box] : null;
+  if (!box) return;
+  const localTop = place.topStart - place.slotStart;
+  camera.zoom = 3;
+  camera.cx = box.ox + totalW / 2;
+  camera.cy = yFromBase(box.y0, localTop + 1);
+  applyCamera();
+}
+
+function intervalLine(interval) {
+  const place = intervalBlock(interval);
+  const where = place ? `caixa ${place.box + 1}, canaleta ${place.channel + 1}` : "sem testemunho";
+  const inbox = interval.recuperacaoMm > 0
+    ? `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`
+    : "—";
+  return `${interval.index + 1}. P ${depthSpan(interval)} · A ${formatMeters(interval.avancoMm)} · R ${formatMeters(interval.recuperacaoMm)} · na caixa ${inbox} · ${where}${interval.info ? ` · ${interval.info}` : ""}`;
+}
+
+function reportText() {
+  const intervals = currentIntervals();
+  const name = currentHole()?.name.trim() || "Sem nome";
+  const last = intervals[intervals.length - 1];
+  if (!last) return "";
+  const lines = [
+    `Pandora · Furo ${name}`,
+    `Avanço ${formatMeters(last.profundidadeFinalMm)}`,
+    `Recuperação ${formatMeters(last.recuperacaoFinalMm)} (${formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm)})`,
+    `Caixas ${boxCount()}`,
+    "",
+  ];
+  for (const interval of intervals) lines.push(intervalLine(interval));
+  return lines.join("\n");
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function downloadTable() {
+  const hole = currentHole();
+  const intervals = currentIntervals();
+  if (!hole || !intervals.length) return;
+  const name = hole.name.trim() || "Sem nome";
+  const rows = [[
+    "Furo",
+    "Taquinho",
+    "Profundidade",
+    "Avanço",
+    "Recuperação",
+    "Na caixa",
+    "Caixa",
+    "Canaleta",
+    "Cor",
+    "Informação",
+  ]];
+  for (const interval of intervals) {
+    const place = intervalBlock(interval);
+    const inbox = interval.recuperacaoMm > 0
+      ? `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`
+      : "";
+    rows.push([
+      name,
+      String(interval.index + 1),
+      depthSpan(interval),
+      formatMeters(interval.avancoMm),
+      formatMeters(interval.recuperacaoMm),
+      inbox,
+      place ? String(place.box + 1) : "",
+      place ? String(place.channel + 1) : "",
+      materialName(normalizeHex(interval.color)),
+      interval.info || "",
+    ]);
+  }
+  const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(";")).join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  const safe = (hole.name.trim() || "furo").replace(/[^\p{L}\p{N}._-]+/gu, "-");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${safe}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showNote("Tabela do furo gerada.");
+}
+
+async function copyIntervalLine(interval) {
+  try {
+    await navigator.clipboard.writeText(intervalLine(interval));
+    showNote("Intervalo copiado.");
+  } catch {
+    showError("Não foi possível copiar o intervalo.");
+  }
+}
+
+function downloadHole() {
+  const hole = currentHole();
+  if (!hole || !taquinhos.length) return;
+  persistHoles();
+  const blob = new Blob([JSON.stringify({ name: hole.name, items: hole.items }, null, 2)], {
+    type: "application/json",
+  });
+  const link = document.createElement("a");
+  const safe = (hole.name.trim() || "furo").replace(/[^\p{L}\p{N}._-]+/gu, "-");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${safe}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showNote("Arquivo do furo gerado.");
+}
+
+function importHoleFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const raw = JSON.parse(String(reader.result || ""));
+      const items = sanitizeStored(raw?.items || raw?.taquinhos);
+      if (!items.length) {
+        showError("O arquivo não tem taquinhos válidos.");
+        return;
+      }
+      persistHoles();
+      const hole = {
+        id: crypto.randomUUID(),
+        name: String(raw?.name || raw?.furo || "Importado").slice(0, 32),
+        items,
+      };
+      holes.push(hole);
+      activeHoleId = hole.id;
+      taquinhos = cloneItems(items);
+      undoStack.length = 0;
+      freshId = null;
+      selectedId = null;
+      focusedBox = null;
+      clearListFilter();
+      beginEdit(null);
+      clearConsulta();
+      syncHoleInput();
+      showError("");
+      showNote(`Furo ${hole.name || "importado"} aberto a partir do arquivo.`);
+      renderAll();
+    } catch {
+      showError("Não foi possível ler esse arquivo.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+function repeatLast() {
+  const last = taquinhos[taquinhos.length - 1];
+  if (!last || editingId) return;
+  snapshotLog();
+  const id = crypto.randomUUID();
+  freshId = id;
+  taquinhos.push({
+    id,
+    avancoMm: last.avancoMm,
+    recuperacaoMm: last.recuperacaoMm,
+    info: last.info,
+    color: last.color,
+  });
+  clearConsulta();
+  showNote("Último intervalo repetido.");
+  renderAll();
+  document.querySelector("#taquinho-list li.is-fresh")?.scrollIntoView({ block: "nearest" });
+}
+
+async function clearHole() {
+  if (!taquinhos.length) return;
+  const label = currentHole()?.name.trim() || "sem nome";
+  const ok = await askConfirm(`Apagar todos os taquinhos do furo ${label}? O furo continua salvo, vazio.`, "Apagar");
+  if (!ok) return;
+  snapshotLog();
+  taquinhos = [];
+  freshId = null;
+  selectedId = null;
+  beginEdit(null);
+  clearConsulta();
+  showNote("Taquinhos apagados. Use Desfazer para recuperar.");
+  renderAll();
+}
+
+async function copyReport() {
+  const text = reportText();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showNote("Resumo copiado.");
+  } catch {
+    showError("Não foi possível copiar o resumo.");
+  }
+}
+
+function bindHole() {
+  loadHoles();
+  syncHoleInput();
+  const input = document.getElementById("hole-id");
+  input?.addEventListener("input", () => {
+    const hole = currentHole();
+    if (!hole || !input) return;
+    hole.name = input.value.slice(0, 32);
+    refreshHoleSelect();
+    persistHoles();
+  });
+  input?.addEventListener("change", () => {
+    const hole = currentHole();
+    if (!hole || !input) return;
+    hole.name = input.value.trim();
+    input.value = hole.name;
+    refreshHoleSelect();
+    persistHoles();
+  });
+  document.getElementById("hole-list")?.addEventListener("change", (event) => {
+    const select = event.currentTarget;
+    if (select instanceof HTMLSelectElement) openHole(select.value);
+  });
+  document.getElementById("hole-new")?.addEventListener("click", createHole);
+  document.getElementById("hole-delete")?.addEventListener("click", deleteHole);
+  document.getElementById("repeat-last")?.addEventListener("click", repeatLast);
+  document.getElementById("undo-log")?.addEventListener("click", undoLog);
+  document.getElementById("copy-report")?.addEventListener("click", () => {
+    copyReport();
+  });
+  document.getElementById("download-hole")?.addEventListener("click", downloadHole);
+  document.getElementById("download-table")?.addEventListener("click", downloadTable);
+  document.getElementById("import-hole")?.addEventListener("click", () => {
+    document.getElementById("hole-file")?.click();
+  });
+  document.getElementById("hole-file")?.addEventListener("change", (event) => {
+    const fileInput = event.currentTarget;
+    if (!(fileInput instanceof HTMLInputElement)) return;
+    const file = fileInput.files?.[0];
+    fileInput.value = "";
+    if (file) importHoleFile(file);
+  });
+  document.getElementById("clear-hole")?.addEventListener("click", clearHole);
+  document.getElementById("edit-cancel")?.addEventListener("click", () => {
+    const form = document.getElementById("taquinho-form");
+    beginEdit(null);
+    if (form instanceof HTMLFormElement) {
+      form.avanco.value = "";
+      form.recuperacao.value = "";
+      form.info.value = "";
+    }
+    showNote("");
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z" || event.shiftKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    event.preventDefault();
+    undoLog();
+  });
+}
+
+function askConfirm(message, okLabel) {
+  const dialog = document.getElementById("confirm-dialog");
+  const text = document.getElementById("confirm-message");
+  const ok = document.getElementById("confirm-ok");
+  if (!(dialog instanceof HTMLDialogElement) || !text || !ok) return Promise.resolve(window.confirm(message));
+  if (dialog.open) return Promise.resolve(false);
+  text.textContent = message;
+  ok.textContent = okLabel || "Confirmar";
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+  });
+}
+
+function setTrayExpanded(expanded) {
+  const workspace = document.querySelector(".workspace");
+  const button = document.getElementById("tray-expand");
+  workspace?.classList.toggle("is-wide", expanded);
+  document.body.classList.toggle("tray-wide", expanded);
+  if (button) {
+    button.textContent = expanded ? "Reduzir" : "Ampliar";
+    button.setAttribute("aria-pressed", expanded ? "true" : "false");
+  }
+  requestAnimationFrame(() => layoutTaquinhoFaces());
+}
+
+function closeHoleMenu() {
+  const more = document.getElementById("hole-menu-open");
+  const actions = document.getElementById("log-actions");
+  if (!more || !actions || actions.hidden) return;
+  actions.hidden = true;
+  more.setAttribute("aria-expanded", "false");
+}
+
+function bindChrome() {
+  document.getElementById("password-toggle")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    const input = document.getElementById("login-password");
+    const button = event.currentTarget;
+    if (!(input instanceof HTMLInputElement) || !(button instanceof HTMLButtonElement)) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    button.textContent = show ? "Ocultar" : "Mostrar";
+    button.setAttribute("aria-pressed", show ? "true" : "false");
+    button.setAttribute("aria-label", show ? "Ocultar senha" : "Mostrar senha");
+  });
+
+  document.querySelectorAll(".fold-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const body = document.getElementById(button.getAttribute("aria-controls") || "");
+      if (!body || !(button instanceof HTMLButtonElement)) return;
+      const collapse = button.getAttribute("aria-expanded") !== "false";
+      button.setAttribute("aria-expanded", collapse ? "false" : "true");
+      const label = button.getAttribute("aria-label") || "";
+      button.setAttribute("aria-label", collapse ? label.replace(/^Recolher/, "Mostrar") : label.replace(/^Mostrar/, "Recolher"));
+      body.hidden = collapse;
+    });
+  });
+
+  document.getElementById("tray-expand")?.addEventListener("click", () => {
+    setTrayExpanded(!document.querySelector(".workspace.is-wide"));
+  });
+  document.getElementById("shortcuts-open")?.addEventListener("click", () => {
+    const dialog = document.getElementById("shortcuts-dialog");
+    if (dialog instanceof HTMLDialogElement) dialog.showModal();
+  });
+  document.getElementById("list-filter")?.addEventListener("input", () => {
+    renderList(currentIntervals());
+  });
+
+  const menu = document.getElementById("hole-menu");
+  const more = document.getElementById("hole-menu-open");
+  const actions = document.getElementById("log-actions");
+  more?.addEventListener("click", () => {
+    if (!actions || !(more instanceof HTMLButtonElement)) return;
+    const open = more.getAttribute("aria-expanded") === "true";
+    if (open) {
+      closeHoleMenu();
+      return;
+    }
+    actions.hidden = false;
+    more.setAttribute("aria-expanded", "true");
+    const theme = document.getElementById("theme-panel");
+    const themeOpen = document.getElementById("theme-open");
+    if (theme) theme.hidden = true;
+    themeOpen?.setAttribute("aria-expanded", "false");
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!actions || actions.hidden) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (menu?.contains(target)) return;
+    closeHoleMenu();
+  });
+  actions?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest("button")) return;
+    closeHoleMenu();
   });
 }
 
@@ -2076,6 +2880,7 @@ if (typeof document !== "undefined") {
   bindAuth();
   bindTheme();
   bindHole();
+  bindChrome();
   buildTopView();
   bindForm();
   bindLocate();
