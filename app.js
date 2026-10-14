@@ -51,6 +51,7 @@ const layout = {
 let freshId = null;
 let selectedId = null;
 let editingId = null;
+let openCardId = null;
 /** @type {null | Record<string, any>} */
 let probePin = null;
 
@@ -822,7 +823,8 @@ function drawMeterMarks(parent, intervals) {
     while (placed.some((item) => item.key === key && item.shift === shift)) shift += 1;
     placed.push({ key, shift });
     const sx = x - 0.1 - size - shift;
-    const sy = y;
+    // A base do quadrado encosta na linha do metro. O quadrado ocupa o centímetro acima dela.
+    const sy = y - size;
     const chip = el("g");
     const title = el("title");
     title.textContent = `${mark.meter} m`;
@@ -841,7 +843,7 @@ function drawMeterMarks(parent, intervals) {
     );
     const label = el("text", {
       x: sx + size / 2,
-      y: y + size / 2,
+      y: sy + size / 2,
       "text-anchor": "middle",
       "dominant-baseline": "middle",
       fill: "var(--box)",
@@ -1072,7 +1074,7 @@ function renderList(intervals) {
     if (t.id === freshId) li.classList.add("is-fresh");
     if (t.id === selectedId || t.id === editingId) li.classList.add("is-picked");
     const color = normalizeHex(t.color);
-    li.style.borderLeftColor = color;
+    li.style.setProperty("--card-color", color);
     const hasCore = t.recuperacaoMm > 0;
     if (!hasCore) li.classList.add("is-empty-recovery");
     else if (t.recuperacaoMm < t.avancoMm) li.classList.add("is-partial");
@@ -1087,26 +1089,33 @@ function renderList(intervals) {
       : place
         ? `${formatCm(place.topStart - place.slotStart)} da base`
         : "—";
+    const badge = !hasCore
+      ? `<span class="loss-badge is-zero">Sem testemunho</span>`
+      : t.recuperacaoMm < t.avancoMm
+        ? `<span class="loss-badge">Perda</span>`
+        : t.recuperacaoMm > t.avancoMm
+          ? `<span class="loss-badge is-excess">R &gt; A</span>`
+          : "";
+    const tone = ratioTone(t.avancoMm > 0 ? (t.recuperacaoMm / t.avancoMm) * 100 : null);
+    const open = openCardId === t.id;
+    li.classList.toggle("is-open", open);
     li.innerHTML = `
-      <div class="card-body">
-        <div class="card-head">
-          <strong><span class="swatch" style="background:${color}"></span>Taquinho ${t.index + 1}${
-            !hasCore
-              ? `<span class="loss-badge is-zero">Sem testemunho</span>`
-              : t.recuperacaoMm < t.avancoMm
-                ? `<span class="loss-badge">Perda</span>`
-                : t.recuperacaoMm > t.avancoMm
-                  ? `<span class="loss-badge is-excess">R &gt; A</span>`
-                  : ""
-          }</strong>
-          <span class="chip">${where}</span>
-        </div>
+      <button type="button" class="card-toggle" aria-expanded="${open ? "true" : "false"}">
+        <span class="swatch" style="background:${color}"></span>
+        <span class="card-id">
+          <strong>Taquinho ${t.index + 1}${badge}</strong>
+          <span class="card-meta">${depth}</span>
+        </span>
+        <span class="card-pct ${tone}">${formatRatio(t.avancoMm, t.recuperacaoMm)}</span>
+        <span class="card-chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4.5 6.2 8 9.8l3.5-3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </button>
+      <div class="card-panel">
         <dl class="specs">
-          <div class="spec-tile"><dt><span class="spec-k">A</span> Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
-          <div class="spec-tile"><dt><span class="spec-k">R</span> Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
-          <div class="spec-tile ${ratioTone(t.avancoMm > 0 ? (t.recuperacaoMm / t.avancoMm) * 100 : null)}"><dt><span class="spec-k">%</span> Recuperação</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
-          <div class="spec-line"><dt><span class="spec-k">P</span> Profundidade</dt><dd>${depth}</dd></div>
+          <div class="spec-line"><dt>Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
+          <div class="spec-line"><dt>Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
+          <div class="spec-line"><dt>Percentual</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
           <div class="spec-line"><dt>Na caixa</dt><dd>${recovered}</dd></div>
+          <div class="spec-line"><dt>Posição</dt><dd>${where}</dd></div>
           <div class="spec-line"><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
           ${t.geo?.litologia ? `<div class="spec-line"><dt>Litologia</dt><dd>${escapeHtml(t.geo.litologia)}</dd></div>` : ""}
           ${t.geo?.alteracao ? `<div class="spec-line"><dt>Alteração</dt><dd>${escapeHtml(t.geo.alteracao)}</dd></div>` : ""}
@@ -1170,10 +1179,10 @@ function renderList(intervals) {
       renderAll();
     });
     actions.appendChild(btn);
-    li.appendChild(actions);
-    li.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("button")) return;
-      revealInterval(t.id, { zoom: false });
+    li.querySelector(".card-panel")?.appendChild(actions);
+    li.querySelector(".card-toggle")?.addEventListener("click", () => {
+      openCardId = openCardId === t.id ? null : t.id;
+      renderList(currentIntervals());
     });
     list.appendChild(li);
   }
@@ -1376,12 +1385,14 @@ function bindForm() {
       current.color = color;
       current.geo = geo;
       freshId = current.id;
+      openCardId = current.id;
       beginEdit(null);
       showNote(roundingNote || "Taquinho atualizado.");
     } else {
       snapshotLog("Taquinho adicionado");
       const id = crypto.randomUUID();
       freshId = id;
+      openCardId = id;
       taquinhos.push({
         id,
         avancoMm: avanco.mm,
@@ -2733,12 +2744,14 @@ function syncLogActions() {
   const copy = document.getElementById("copy-report");
   const download = document.getElementById("download-hole");
   const table = document.getElementById("download-table");
+  const bulletin = document.getElementById("bulletin-open");
   const clear = document.getElementById("clear-hole");
   if (repeat) repeat.disabled = !hasItems || Boolean(editingId);
   if (undo) undo.disabled = undoStack.length === 0;
   if (copy) copy.disabled = !hasItems;
   if (download) download.disabled = !hasItems;
   if (table) table.disabled = !hasItems;
+  if (bulletin) bulletin.disabled = !hasItems;
   if (clear) clear.disabled = !hasItems;
   const fim = document.getElementById("fim-toggle");
   if (fim) {
@@ -2801,6 +2814,7 @@ function holeTouchedAt(id) {
 }
 
 function showHome() {
+  if (typeof closeBulletin === "function") closeBulletin();
   if (logReady) persistHoles();
   document.documentElement.classList.remove("resume-work");
   document.body.classList.add("is-home");
@@ -3638,6 +3652,7 @@ async function confirmDiscardDraft() {
 
 async function openHole(id) {
   if (!id) return;
+  if (typeof closeBulletin === "function") closeBulletin();
   if (id !== activeHoleId) {
     if (!(await confirmDiscardDraft())) {
       syncHoleInput();
@@ -3772,6 +3787,7 @@ function beginEdit(id) {
   const cancel = document.getElementById("edit-cancel");
   const item = id ? taquinhos.find((entry) => entry.id === id) : null;
   editingId = item ? item.id : null;
+  if (item) openCardId = item.id;
   const entry = form?.closest(".entry-block");
   if (!form || !item) {
     editingId = null;
@@ -3971,6 +3987,7 @@ function repeatLast() {
   snapshotLog("Intervalo repetido");
   const id = crypto.randomUUID();
   freshId = id;
+  openCardId = id;
   taquinhos.push({
     id,
     avancoMm: last.avancoMm,
@@ -4556,6 +4573,9 @@ function buildBulletinModel(items, hole, generatedAt) {
       pct: interval.avancoMm > 0 ? (interval.recuperacaoMm / interval.avancoMm) * 100 : null,
       boxes: joinList(place.boxes),
       channels: joinList(place.channels),
+      where: place.core
+        ? `${joinList(place.channels)}${place.marker ? ` · taquinho ${place.marker}` : ""}`
+        : (place.marker || "—"),
       core: place.core,
       marker: place.marker,
       info: interval.info || "",
@@ -4621,9 +4641,9 @@ function buildBulletinModel(items, hole, generatedAt) {
 function bulletinNarrative(model) {
   const stats = model.stats;
   const who = model.name
-    ? `A sondagem ${model.name}`
-    : "Esta sondagem não tem código no campo Furo";
-  const lead = [`${who} tem profundidade registrada de ${formatMeters(stats.depth)} e avanço acumulado de ${formatMeters(stats.advance)}.`];
+    ? `A sondagem ${model.name} tem profundidade registrada de ${formatMeters(stats.depth)} e avanço acumulado de ${formatMeters(stats.advance)}.`
+    : `Esta sondagem não tem código no campo Furo. A profundidade registrada é ${formatMeters(stats.depth)} e o avanço acumulado é ${formatMeters(stats.advance)}.`;
+  const lead = [who];
   if (stats.advance === stats.depth) lead.push("A profundidade final é a soma dos avanços lançados.");
   if (stats.advance > 0) {
     lead.push(`A recuperação acumulada é ${formatMeters(stats.recovery)}, correspondente a ${formatRatio(stats.advance, stats.recovery)} do avanço.`);
@@ -4682,5 +4702,7 @@ if (typeof module !== "undefined" && module.exports) {
     meterMarkPositions,
     normalizeGeo,
     geoIsEmpty,
+    buildBulletinModel,
+    bulletinNarrative,
   };
 }

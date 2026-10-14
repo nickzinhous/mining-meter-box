@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=40" />
+    <link rel="stylesheet" href="styles.css?v=55" />
     <style>
       .login-screen {
         position: fixed;
@@ -119,6 +119,7 @@
                   <button type="button" id="print-one" class="btn-quiet">Imprimir esta caixa</button>
                   <button type="button" id="print-sheet-btn" class="btn-quiet">Ficha da caixa</button>
                   <button type="button" id="print-report" class="btn-quiet">Relatório</button>
+                  <button type="button" id="bulletin-open" class="btn-quiet" disabled>Gerar boletim técnico</button>
                   <button type="button" id="import-hole" class="btn-quiet">Abrir arquivo</button>
                 </div>
                 <div class="menu-group">
@@ -161,6 +162,59 @@
       </header>
 
       <section id="home" class="home" aria-labelledby="home-title">
+        <div class="mine-stage" aria-hidden="true">
+          <div class="mine-motes"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="mine-rig">
+            <div class="mine-box">
+              <div class="mine-lid">
+                <div class="mine-plate"><span>Caixa 01</span><span>0–100 cm</span></div>
+                <div class="mine-bed">
+                  <div class="mine-scale"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
+                  <div class="mine-ch">
+                    <b>01</b>
+                    <div class="mine-run" style="--h:96%">
+                      <span style="--p:15;--c:#5c4030"></span>
+                      <span style="--p:8;--c:#c4a574"></span>
+                      <span class="is-gap" style="--p:3"></span>
+                      <span style="--p:17;--c:#8d5a32"></span>
+                      <span style="--p:9;--c:#e2c15a"></span>
+                      <span style="--p:16;--c:#4e555c"></span>
+                      <span class="is-gap" style="--p:2"></span>
+                      <span style="--p:14;--c:#6a7344"></span>
+                      <span style="--p:12;--c:#d9d3c7"></span>
+                    </div>
+                  </div>
+                  <div class="mine-ch">
+                    <b>02</b>
+                    <div class="mine-run" style="--h:84%">
+                      <span style="--p:18;--c:#3d4654"></span>
+                      <span style="--p:11;--c:#6d5a78"></span>
+                      <span style="--p:14;--c:#8d5a32"></span>
+                      <span class="is-gap" style="--p:4"></span>
+                      <span style="--p:16;--c:#6a7344"></span>
+                      <span style="--p:13;--c:#4c6280"></span>
+                      <span style="--p:8;--c:#c5c1b8"></span>
+                    </div>
+                  </div>
+                  <div class="mine-ch">
+                    <b>03</b>
+                    <div class="mine-run is-live" style="--h:78%">
+                      <span style="--p:14;--c:#c4843c"></span>
+                      <span style="--p:10;--c:#e2c15a"></span>
+                      <span class="is-gap" style="--p:3"></span>
+                      <span style="--p:18;--c:#5c3a28"></span>
+                      <span style="--p:15;--c:#3f6f62"></span>
+                      <span style="--p:12;--c:#d9d3c7"></span>
+                    </div>
+                  </div>
+                </div>
+                <span class="mine-beam"></span>
+              </div>
+              <div class="mine-lip"></div>
+              <div class="mine-wall"></div>
+            </div>
+          </div>
+        </div>
         <div class="home-sheet">
           <div class="home-heading">
             <div>
@@ -299,22 +353,23 @@
           </form>
           <p id="form-error" class="form-error" hidden></p>
           <p id="form-note" class="form-note" hidden></p>
-          <div id="hole-status" class="hole-status" hidden>
+          </section>
+
+          <section id="hole-status" class="side-block" hidden>
+          <h2 class="list-title">Resumo do furo</h2>
+          <div class="hole-facts">
             <p><span>Avanço</span><strong id="stat-advance"></strong></p>
             <p><span>Recuperação</span><strong id="stat-recovery"></strong></p>
             <p><span>Percentual</span><strong id="stat-ratio"></strong></p>
             <p><span>Caixas</span><strong id="stat-boxes"></strong></p>
             <p><span>Canaletas</span><strong id="stat-channels"></strong></p>
             <p><span>Com perda</span><strong id="stat-loss"></strong></p>
-            <ul id="lithology-legend" class="lithology-legend" hidden></ul>
-            <ul id="audit-list" class="audit-list" hidden></ul>
           </div>
-          <details id="change-log" class="change-log" hidden>
-            <summary>Alterações neste navegador</summary>
-            <ol id="change-list"></ol>
-          </details>
-          <p id="accum-summary" class="accum-summary" hidden></p>
+          <ul id="lithology-legend" class="lithology-legend" hidden></ul>
+          <ul id="audit-list" class="audit-list" hidden></ul>
           </section>
+
+          <p id="accum-summary" class="accum-summary" hidden></p>
 
           <section class="side-block">
           <h2 class="list-title">
@@ -333,7 +388,7 @@
               autocomplete="off"
             />
           </label>
-          <div id="depth-filter" class="form depth-filter" hidden>
+          <div id="depth-filter" class="depth-filter" hidden>
             <label class="field">
               <span>Profundidade de</span>
               <input id="filter-from" type="text" inputmode="decimal" placeholder="0,00" autocomplete="off" />
@@ -508,6 +563,29 @@
       </form>
     </dialog>
     <article id="print-sheet" class="print-sheet"></article>
-    <script src="app.js?v=41"></script>
+    <div id="bulletin-root" class="bulletin-root" hidden>
+      <div class="bulletin-toolbar">
+        <div class="bulletin-toolbar-row">
+          <strong>Boletim técnico</strong>
+          <div class="bulletin-modes">
+            <button type="button" id="bulletin-full">Completo</button>
+            <button type="button" id="bulletin-short">Resumido</button>
+          </div>
+          <div class="bulletin-toolbar-actions">
+            <button type="button" id="bulletin-print" class="btn">Imprimir</button>
+            <button type="button" id="bulletin-pdf" class="btn">Baixar PDF</button>
+            <button type="button" id="bulletin-close" class="btn-logout">Fechar</button>
+          </div>
+        </div>
+        <div id="bulletin-sections" class="bulletin-sections"></div>
+        <p class="bulletin-toolbar-note">A prévia e o PDF usam os registros desta sondagem. Gerar o boletim não altera, apaga nem recria os dados.</p>
+      </div>
+      <div class="bulletin-scroll">
+        <style id="bulletin-page-css"></style>
+        <article id="bulletin-sheet" class="bulletin-sheet"></article>
+      </div>
+    </div>
+    <script src="app.js?v=46"></script>
+    <script src="bulletin.js?v=2"></script>
   </body>
 </html>
