@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pandora</title>
-    <link rel="icon" href="favicon.svg?v=4" type="image/svg+xml" />
+    <link rel="icon" href="favicon.svg?v=5" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=31" />
+    <link rel="stylesheet" href="styles.css?v=37" />
     <style>
       .login-screen {
         position: fixed;
@@ -43,7 +43,7 @@
     <section id="login-screen" class="login-screen" aria-labelledby="login-title">
       <form id="login-form" class="login-card">
         <div class="brand">
-          <img class="brand-logo" src="favicon.svg?v=4" alt="" width="32" height="32" />
+          <span class="brand-mark"><img class="brand-logo" src="favicon.svg?v=5" alt="" width="32" height="32" /></span>
           <h1>Pandora</h1>
         </div>
         <h2 id="login-title">Entrar</h2>
@@ -83,7 +83,7 @@
     <main class="app">
       <header class="header">
         <div class="brand">
-          <img class="brand-logo" src="favicon.svg?v=4" alt="" width="32" height="32" />
+          <span class="brand-mark"><img class="brand-logo" src="favicon.svg?v=5" alt="" width="32" height="32" /></span>
           <h1>Pandora</h1>
           <button type="button" class="btn-help" aria-label="Ajuda sobre a caixa">
             ?
@@ -106,20 +106,26 @@
                 Ações
               </button>
               <div id="log-actions" class="hole-menu-panel" hidden>
-                <button type="button" id="repeat-last" class="btn-quiet" disabled>Repetir último</button>
-                <button type="button" id="undo-log" class="btn-quiet" disabled>Desfazer</button>
-                <button type="button" id="copy-report" class="btn-quiet" disabled>Copiar resumo</button>
-                <button type="button" id="download-hole" class="btn-quiet" disabled>Baixar furo</button>
-                <button type="button" id="download-table" class="btn-quiet" disabled title="CSV com separador ponto e vírgula, para abrir no Excel">Baixar tabela</button>
-                <button type="button" id="print-hole" class="btn-quiet">Imprimir caixas</button>
-                <button type="button" id="print-one" class="btn-quiet">Imprimir esta caixa</button>
-                <button type="button" id="print-sheet-btn" class="btn-quiet">Ficha da caixa</button>
-                <button type="button" id="print-report" class="btn-quiet">Relatório</button>
-                <button type="button" id="import-hole" class="btn-quiet">Abrir arquivo</button>
-                <button type="button" id="clear-hole" class="btn-quiet" disabled>Limpar furo</button>
-                <button type="button" id="hole-delete" class="btn-quiet">Excluir furo</button>
-                <button type="button" id="geo-toggle" class="btn-quiet" aria-pressed="false">Ativar descrição geológica</button>
-                <button type="button" id="shortcuts-open" class="btn-quiet">Atalhos</button>
+                <div class="menu-group">
+                  <button type="button" id="repeat-last" class="btn-quiet" disabled>Repetir último</button>
+                  <button type="button" id="undo-log" class="btn-quiet" disabled>Desfazer</button>
+                  <button type="button" id="copy-report" class="btn-quiet" disabled>Copiar resumo</button>
+                </div>
+                <div class="menu-group">
+                  <button type="button" id="download-hole" class="btn-quiet" disabled>Baixar furo</button>
+                  <button type="button" id="download-table" class="btn-quiet" disabled title="CSV com separador ponto e vírgula, para abrir no Excel">Baixar tabela</button>
+                  <button type="button" id="print-hole" class="btn-quiet">Imprimir caixas</button>
+                  <button type="button" id="print-one" class="btn-quiet">Imprimir esta caixa</button>
+                  <button type="button" id="print-sheet-btn" class="btn-quiet">Ficha da caixa</button>
+                  <button type="button" id="print-report" class="btn-quiet">Relatório</button>
+                  <button type="button" id="import-hole" class="btn-quiet">Abrir arquivo</button>
+                </div>
+                <div class="menu-group">
+                  <button type="button" id="clear-hole" class="btn-quiet is-danger" disabled>Limpar furo</button>
+                  <button type="button" id="hole-delete" class="btn-quiet is-danger">Excluir furo</button>
+                  <button type="button" id="geo-toggle" class="btn-quiet" aria-pressed="false">Ativar descrição geológica</button>
+                  <button type="button" id="shortcuts-open" class="btn-quiet">Atalhos</button>
+                </div>
                 <input id="hole-file" type="file" accept="application/json,.json" hidden />
               </div>
             </div>
@@ -190,9 +196,9 @@
             <p id="next-depth" class="next-depth">O primeiro intervalo começa em 0,00 m.</p>
           </header>
           <form id="taquinho-form" class="form">
-            <div class="measure-pair">
-              <label class="field" title="Metros perfurados neste intervalo. A profundidade é a soma dos avanços.">
-                <span>Avanço <i class="unit">m</i></span>
+            <label class="field field--full measure" title="Metros perfurados neste intervalo. A profundidade é a soma dos avanços.">
+              <span>Avanço</span>
+              <span class="measure-input">
                 <input
                   name="avanco"
                   type="text"
@@ -201,9 +207,12 @@
                   autocomplete="off"
                   required
                 />
-              </label>
-              <label class="field" title="Comprimento de testemunho que entra na caixa. Não pode passar do avanço.">
-                <span>Recuperação <i class="unit">m</i></span>
+                <span class="unit">m</span>
+              </span>
+            </label>
+            <label class="field field--full measure" title="Comprimento de testemunho que entra na caixa. Não pode passar do avanço.">
+              <span>Recuperação</span>
+              <span class="measure-input">
                 <input
                   name="recuperacao"
                   type="text"
@@ -212,14 +221,15 @@
                   autocomplete="off"
                   required
                 />
-              </label>
-            </div>
+                <span class="unit">m</span>
+              </span>
+            </label>
             <label class="field field--full">
               <span>Informação</span>
               <input
                 name="info"
                 type="text"
-                placeholder="opcional"
+                placeholder="ex.: arenito"
                 maxlength="80"
               />
             </label>
@@ -493,6 +503,6 @@
       </form>
     </dialog>
     <article id="print-sheet" class="print-sheet"></article>
-    <script src="app.js?v=31"></script>
+    <script src="app.js?v=33"></script>
   </body>
 </html>

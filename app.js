@@ -31,7 +31,7 @@ const MATERIAL_COLORS = [
 ];
 const DEFAULT_MATERIAL = MATERIAL_COLORS[7];
 
-/** Intervalo informado. A posição física é derivada da recuperação acumulada. */
+/** Intervalo informado. O testemunho ocupa a recuperação; recuperação zero ainda marca um taquinho, um friso à frente. */
 /** @type {{ id: string, avancoMm: number, recuperacaoMm: number, info: string, color: string }[]} */
 let taquinhos = [];
 /** @type {null | { depthUm: number, tapeUm: number, physicalUm: number, intervalIndex: number }} */
@@ -152,7 +152,7 @@ function auditIntervals(intervals) {
       issues.push({
         level: "erro",
         id: item.id,
-        text: `${label}: a recuperação (${formatMeters(item.recuperacaoMm)}) é maior que o avanço (${formatMeters(item.avancoMm)}). Edite o intervalo; os números não foram alterados.`,
+        text: `${label}: Erro de validação: a recuperação não pode ser maior que o avanço da manobra. Verifique os valores informados antes de continuar.`,
       });
     }
     if (item.profundidadeFinalMm < item.profundidadeInicialMm) {
@@ -287,10 +287,34 @@ function findIntervalAtRecovery(intervals, recoveryMm) {
   return null;
 }
 
+const RECOVERY_LIMIT_MESSAGE =
+  "Erro de validação: a recuperação não pode ser maior que o avanço da manobra. Verifique os valores informados antes de continuar.";
+
+function recoveryExceedsAdvance(advanceMm, recoveryMm) {
+  return recoveryMm > advanceMm || roundCoreMm(recoveryMm) > advanceMm;
+}
+
+/** Primeiro encaixe de taquinho que termina depois de `mm`. */
+function markerFrom(mm) {
+  let slot = placement(mm);
+  if (slot.topEnd * MM <= mm) slot = placement(slot.topEnd * MM);
+  return slot;
+}
+
+/**
+ * Recuperação zero não deposita testemunho, mas o taquinho da manobra
+ * não pode encostar no anterior: pula um friso e marca o encaixe seguinte.
+ */
+function placeZeroRecovery(afterMarkerEndMm) {
+  const skipped = markerFrom(afterMarkerEndMm);
+  return markerFrom(skipped.topEnd * MM);
+}
+
 function accumulateIntervals(items) {
   let advanceMm = 0;
   let recoveryMm = 0;
   let occupiedMm = 0;
+  let lastMarkerEndMm = 0;
   return items.map((item, index) => {
     const recuperacaoInicialMm = recoveryMm;
     const recuperacaoFinalMm = recoveryMm + item.recuperacaoMm;
@@ -310,6 +334,14 @@ function accumulateIntervals(items) {
       placed.physicalInicialMm = occupiedMm;
       placed.physicalFinalMm = materialEnd;
       occupiedMm = block.shifted ? block.topEnd * MM : materialEnd;
+      lastMarkerEndMm = block.topEnd * MM;
+    } else {
+      const marker = placeZeroRecovery(lastMarkerEndMm);
+      const point = marker.topStart * MM;
+      placed.physicalInicialMm = point;
+      placed.physicalFinalMm = point;
+      lastMarkerEndMm = marker.topEnd * MM;
+      occupiedMm = lastMarkerEndMm;
     }
     advanceMm = placed.profundidadeFinalMm;
     recoveryMm = recuperacaoFinalMm;
@@ -318,7 +350,7 @@ function accumulateIntervals(items) {
 }
 
 function intervalBlock(interval) {
-  if (!interval || interval.recuperacaoMm <= 0) return null;
+  if (!interval || interval.physicalFinalMm == null) return null;
   return placement(interval.physicalFinalMm);
 }
 
@@ -385,7 +417,6 @@ function boxesFor(intervals) {
   let maxBox = 0;
   let any = false;
   for (const interval of intervals) {
-    if (interval.recuperacaoMm <= 0) continue;
     const block = intervalBlock(interval);
     if (!block) continue;
     any = true;
@@ -786,7 +817,6 @@ function renderTaquinhos(intervals) {
   const yBoxes = layout.boxes;
 
   for (const t of intervals) {
-    if (t.recuperacaoMm <= 0) continue;
     const place = intervalBlock(t);
     const box = yBoxes[place.box];
     if (!box) continue;
@@ -934,7 +964,11 @@ function renderList(intervals) {
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
       : "Sem testemunho na caixa";
     const depth = depthSpan(t);
-    const recovered = `${metersLabel(t.physicalInicialMm)}–${formatMeters(t.physicalFinalMm)}`;
+    const recovered = hasCore
+      ? `${metersLabel(t.physicalInicialMm)}–${formatMeters(t.physicalFinalMm)}`
+      : place
+        ? `${formatCm(place.topStart - place.slotStart)} da base`
+        : "—";
     li.innerHTML = `
       <div class="card-body">
         <div class="card-head">
@@ -950,13 +984,17 @@ function renderList(intervals) {
           <span class="chip">${where}</span>
         </div>
         <dl class="specs">
-          <div><dt><span class="spec-k">P</span> · Profundidade</dt><dd>${depth}</dd></div>
-          <div><dt><span class="spec-k">A</span> · Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
-          <div><dt><span class="spec-k">R</span> · Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
-          <div><dt>Na caixa</dt><dd>${hasCore ? recovered : "—"}</dd></div>
-          <div><dt>%</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
-          <div><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
-          ${t.geo?.litologia ? `<div><dt>Litologia</dt><dd>${escapeHtml(t.geo.litologia)}</dd></div>` : ""}
+          <div class="spec-tile"><dt><span class="spec-k">A</span> Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
+          <div class="spec-tile"><dt><span class="spec-k">R</span> Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
+          <div class="spec-tile ${ratioTone(t.avancoMm > 0 ? (t.recuperacaoMm / t.avancoMm) * 100 : null)}"><dt><span class="spec-k">%</span> Recuperação</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
+          <div class="spec-line"><dt><span class="spec-k">P</span> Profundidade</dt><dd>${depth}</dd></div>
+          <div class="spec-line"><dt>Na caixa</dt><dd>${recovered}</dd></div>
+          <div class="spec-line"><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
+          ${t.geo?.litologia ? `<div class="spec-line"><dt>Litologia</dt><dd>${escapeHtml(t.geo.litologia)}</dd></div>` : ""}
+          ${t.geo?.alteracao ? `<div class="spec-line"><dt>Alteração</dt><dd>${escapeHtml(t.geo.alteracao)}</dd></div>` : ""}
+          ${t.geo?.fraturamento ? `<div class="spec-line"><dt>Fraturamento</dt><dd>${escapeHtml(t.geo.fraturamento)}</dd></div>` : ""}
+          ${t.geo?.mineralizacao ? `<div class="spec-line"><dt>Mineralização</dt><dd>${escapeHtml(t.geo.mineralizacao)}</dd></div>` : ""}
+          ${t.geo?.observacoes ? `<div class="spec-line"><dt>Observações</dt><dd>${escapeHtml(t.geo.observacoes)}</dd></div>` : ""}
         </dl>
         ${
           place?.shifted
@@ -973,7 +1011,7 @@ function renderList(intervals) {
     editBtn.textContent = "Editar";
     editBtn.addEventListener("click", () => beginEdit(t.id));
     actions.appendChild(editBtn);
-    if (hasCore) {
+    if (place) {
       const viewBtn = document.createElement("button");
       viewBtn.type = "button";
       viewBtn.className = "btn-quiet";
@@ -1194,13 +1232,11 @@ function bindForm() {
       return;
     }
 
-    const registeredRecovery = roundCoreMm(recuperacao.mm);
-    if (registeredRecovery > avanco.mm) {
-      showError(
-        "A recuperação não pode passar do avanço. Ajuste os valores: o que já foi digitado continua no formulário.",
-      );
+    if (recoveryExceedsAdvance(avanco.mm, recuperacao.mm)) {
+      showError(RECOVERY_LIMIT_MESSAGE);
       return;
     }
+    const registeredRecovery = roundCoreMm(recuperacao.mm);
     const color = normalizeHex(data.get("cor"));
     const geo = readGeoForm(form);
     const roundingNote =
@@ -1254,6 +1290,23 @@ function bindForm() {
     event.preventDefault();
     form.requestSubmit();
   });
+
+  const checkRecoveryLimit = () => {
+    const advance = parseMetersToMm(form.avanco.value);
+    const recovery = parseMetersToMm(form.recuperacao.value);
+    const showingLimit = document.getElementById("form-error")?.textContent === RECOVERY_LIMIT_MESSAGE;
+    if (!advance.ok || !recovery.ok) {
+      if (showingLimit) showError("");
+      return;
+    }
+    if (recoveryExceedsAdvance(advance.mm, recovery.mm)) {
+      showError(RECOVERY_LIMIT_MESSAGE);
+      return;
+    }
+    if (showingLimit) showError("");
+  };
+  form.avanco.addEventListener("input", checkRecoveryLimit);
+  form.recuperacao.addEventListener("input", checkRecoveryLimit);
 }
 
 function bindLocate() {
@@ -2932,6 +2985,8 @@ function renderHistory() {
 function usedChannels(intervals) {
   let maxIndex = -1;
   for (const interval of intervals) {
+    const place = intervalBlock(interval);
+    if (place) maxIndex = Math.max(maxIndex, place.box * CHANNELS + place.channel);
     if (interval.recuperacaoMm <= 0) continue;
     for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
       maxIndex = Math.max(maxIndex, seg.channelIndex);
@@ -3089,12 +3144,15 @@ function locateDepth(mm, resultId) {
   }
   if (interval.recuperacaoMm === 0) {
     consulta = null;
+    const place = intervalBlock(interval);
     selectedId = interval.id;
-    renderAll();
+    revealInterval(interval.id, { zoom: true });
     showCalcResult(
       resultId,
-      `A profundidade ${formatMeters(mm)} cai no taquinho ${interval.index + 1} (${depthSpan(interval)}), sem testemunho recuperado. Não há posição física para destacar na caixa.`,
-      true,
+      place
+        ? `A profundidade ${formatMeters(mm)} cai no taquinho ${interval.index + 1} (${depthSpan(interval)}), sem testemunho recuperado. O taquinho está na caixa ${place.box + 1}, canaleta ${place.channel + 1}.`
+        : `A profundidade ${formatMeters(mm)} cai no taquinho ${interval.index + 1} (${depthSpan(interval)}), sem testemunho recuperado.`,
+      false,
     );
     return;
   }
@@ -3154,7 +3212,7 @@ function jumpTo(raw) {
       return;
     }
     revealInterval(interval.id, { zoom: true });
-    const where = interval.recuperacaoMm > 0 ? "" : " Ele não tem testemunho na caixa.";
+    const where = interval.recuperacaoMm > 0 ? "" : " Sem testemunho recuperado; o taquinho marca o fim da manobra.";
     showCalcResult("jump-result", `Taquinho ${interval.index + 1}, ${depthSpan(interval)}.${where}`, interval.recuperacaoMm <= 0);
     return;
   }
@@ -3563,14 +3621,17 @@ function beginEdit(id) {
   const cancel = document.getElementById("edit-cancel");
   const item = id ? taquinhos.find((entry) => entry.id === id) : null;
   editingId = item ? item.id : null;
+  const entry = form?.closest(".entry-block");
   if (!form || !item) {
     editingId = null;
+    entry?.classList.remove("is-editing");
     if (heading) heading.textContent = "Novo taquinho";
     if (submit) submit.textContent = "Adicionar taquinho";
     if (cancel) cancel.hidden = true;
     syncLogActions();
     return;
   }
+  entry?.classList.add("is-editing");
   form.avanco.value = metersLabel(item.avancoMm);
   form.recuperacao.value = metersLabel(item.recuperacaoMm);
   form.info.value = item.info || "";
@@ -3713,6 +3774,10 @@ function importHoleFile(file) {
         showError("O arquivo não tem taquinhos válidos.");
         return;
       }
+      if (items.some((item) => item.recuperacaoMm > item.avancoMm)) {
+        showError(RECOVERY_LIMIT_MESSAGE);
+        return;
+      }
       persistHoles();
       const hole = {
         id: crypto.randomUUID(),
@@ -3744,6 +3809,10 @@ function importHoleFile(file) {
 function repeatLast() {
   const last = taquinhos[taquinhos.length - 1];
   if (!last || editingId) return;
+  if (recoveryExceedsAdvance(last.avancoMm, last.recuperacaoMm)) {
+    showError(RECOVERY_LIMIT_MESSAGE);
+    return;
+  }
   snapshotLog("Intervalo repetido");
   const id = crypto.randomUUID();
   freshId = id;
@@ -3796,7 +3865,8 @@ async function fillPrintSheet(mode) {
   const boxIndex = focusedBox ?? 0;
   const rows = intervals.filter((interval) => {
     if (mode !== "sheet") return true;
-    if (interval.recuperacaoMm <= 0) return false;
+    const place = intervalBlock(interval);
+    if (interval.recuperacaoMm <= 0) return Boolean(place && place.box === boxIndex);
     return recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm).some((seg) => seg.box === boxIndex);
   });
   const title = mode === "sheet" ? `Ficha da caixa ${String(boxIndex + 1).padStart(2, "0")}` : "Relatório da sondagem";
