@@ -856,11 +856,7 @@ function drawMeterMarks(parent, intervals) {
   parent.appendChild(group);
 }
 
-function renderCores(intervals) {
-  const root = document.getElementById("cores-root");
-  if (!root) return;
-  root.replaceChildren();
-
+function drawCores(root, intervals, pickedId = selectedId) {
   intervals.forEach((interval) => {
     if (interval.recuperacaoMm <= 0) return;
     const fill = normalizeHex(interval.color);
@@ -876,7 +872,7 @@ function renderCores(intervals) {
       const absStart = seg.channelIndex * LENGTH * MM + seg.localStartMm;
       const absEnd = seg.channelIndex * LENGTH * MM + seg.localEndMm;
       const classes = ["core"];
-      if (interval.id === selectedId) classes.push("is-picked");
+      if (pickedId && interval.id === pickedId) classes.push("is-picked");
       root.appendChild(
         el("rect", {
           class: classes.join(" "),
@@ -910,6 +906,13 @@ function renderCores(intervals) {
       );
     }
   });
+}
+
+function renderCores(intervals) {
+  const root = document.getElementById("cores-root");
+  if (!root) return;
+  root.replaceChildren();
+  drawCores(root, intervals);
 }
 
 function appendTaquinho(root, place, id, lines, titleText, picked) {
@@ -957,11 +960,7 @@ function appendTaquinho(root, place, id, lines, titleText, picked) {
   root.appendChild(g);
 }
 
-function renderTaquinhos(intervals) {
-  const root = document.getElementById("taquinhos-root");
-  if (!root) return;
-  root.replaceChildren();
-
+function drawTaquinhos(root, intervals, ended, pickedId = selectedId) {
   for (const t of intervals) {
     const place = intervalBlock(t);
     if (!place) continue;
@@ -977,15 +976,21 @@ function renderTaquinhos(intervals) {
       t.id,
       lines,
       `Avanço ${lines[0].slice(3)}. Recuperação ${lines[1].slice(3)}. Profundidade ${lines[2].slice(3)}.`,
-      t.id === selectedId,
+      t.id === pickedId,
     );
   }
 
-  const fim = fimMarker(intervals, Boolean(currentHole()?.ended));
+  const fim = fimMarker(intervals, ended);
   if (fim) {
     appendTaquinho(root, fim, "fim", ["FIM"], "Fim de furo", false);
   }
+}
 
+function renderTaquinhos(intervals) {
+  const root = document.getElementById("taquinhos-root");
+  if (!root) return;
+  root.replaceChildren();
+  drawTaquinhos(root, intervals, Boolean(currentHole()?.ended));
   layoutTaquinhoFaces();
 }
 
@@ -4233,6 +4238,33 @@ function askConfirm(message, okLabel) {
   });
 }
 
+function meterMarksOn() {
+  try {
+    return localStorage.getItem("mmb-meters") !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function syncMeterMarksButton() {
+  const on = meterMarksOn();
+  document.getElementById("tray-svg")?.classList.toggle("meters-off", !on);
+  const button = document.getElementById("meter-toggle");
+  if (!button) return;
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+  button.setAttribute("aria-checked", on ? "true" : "false");
+  button.title = on ? "Ocultar a marcação de metro a metro" : "Mostrar a marcação de metro a metro";
+}
+
+function setMeterMarksOn(on) {
+  try {
+    localStorage.setItem("mmb-meters", on ? "1" : "0");
+  } catch {
+    /* a preferência fica só nesta visita */
+  }
+  syncMeterMarksButton();
+}
+
 function setTrayExpanded(expanded) {
   const workspace = document.querySelector(".workspace");
   const button = document.getElementById("tray-expand");
@@ -4280,6 +4312,10 @@ function bindChrome() {
 
   document.getElementById("tray-expand")?.addEventListener("click", () => {
     setTrayExpanded(!document.querySelector(".workspace.is-wide"));
+  });
+  syncMeterMarksButton();
+  document.getElementById("meter-toggle")?.addEventListener("click", () => {
+    setMeterMarksOn(!meterMarksOn());
   });
   document.getElementById("shortcuts-open")?.addEventListener("click", () => {
     const dialog = document.getElementById("shortcuts-dialog");
@@ -4388,6 +4424,239 @@ if (typeof document !== "undefined") {
   const session = readSession();
   if (session) showApp(session.username);
   else showLoginScreen();
+}
+
+const BULLETIN_CHECKS = [
+  "Cada manobra tem avanço maior que zero.",
+  "A recuperação não é negativa.",
+  "A recuperação não passa do avanço da mesma manobra.",
+  "A profundidade final não fica menor que a inicial.",
+  "A manobra seguinte começa na profundidade em que a anterior termina.",
+  "Dois testemunhos não ocupam o mesmo trecho da caixa.",
+];
+
+const BULLETIN_SECTIONS = [
+  ["cover", "Capa"],
+  ["summary", "Resumo"],
+  ["table", "Avanços e recuperações"],
+  ["method", "Memória de cálculo"],
+  ["boxes", "Caixas"],
+  ["charts", "Gráficos"],
+  ["geology", "Descrição"],
+  ["photos", "Fotografias"],
+  ["quality", "Pendências"],
+  ["conclusion", "Conclusão"],
+];
+
+const BULLETIN_SHORT = ["cover", "summary", "table", "quality", "conclusion"];
+
+const bulletinState = {
+  model: null,
+  photos: [],
+  on: new Set(),
+  photoError: false,
+};
+
+function nText(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+function bulletinChannels(intervals, ended) {
+  let maxIndex = -1;
+  for (const interval of intervals) {
+    const place = intervalBlock(interval);
+    if (place) maxIndex = Math.max(maxIndex, place.box * CHANNELS + place.channel);
+    if (interval.recuperacaoMm <= 0) continue;
+    for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
+      maxIndex = Math.max(maxIndex, seg.channelIndex);
+    }
+  }
+  const fim = fimMarker(intervals, ended);
+  if (fim) maxIndex = Math.max(maxIndex, fim.box * CHANNELS + fim.channel);
+  return maxIndex + 1;
+}
+
+function bulletinPlace(interval) {
+  const marker = intervalBlock(interval);
+  const markerLabel = marker ? `caixa ${marker.box + 1}, canaleta ${marker.channel + 1}` : "";
+  if (!(interval.recuperacaoMm > 0)) {
+    return {
+      core: "",
+      boxes: marker ? [marker.box + 1] : [],
+      channels: marker ? [marker.channel + 1] : [],
+      marker: markerLabel,
+    };
+  }
+  const segs = recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm);
+  return {
+    core: `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`,
+    boxes: [...new Set(segs.map((seg) => seg.box + 1))],
+    channels: [...new Set(segs.map((seg) => seg.channel + 1))],
+    marker: markerLabel,
+  };
+}
+
+function bulletinTone(interval) {
+  if (!(interval.avancoMm > 0) || interval.recuperacaoMm < 0 || interval.recuperacaoMm > interval.avancoMm) return "is-error";
+  if (interval.recuperacaoMm === 0) return "is-bad";
+  const pct = (interval.recuperacaoMm / interval.avancoMm) * 100;
+  if (pct < 70) return "is-bad";
+  if (pct < 90) return "is-warn";
+  return "";
+}
+
+function joinList(values) {
+  return values.length ? values.join(", ") : "—";
+}
+
+function buildBulletinModel(items, hole, generatedAt) {
+  const source = (items || []).map((item) => ({
+    id: item.id,
+    avancoMm: item.avancoMm,
+    recuperacaoMm: item.recuperacaoMm,
+    info: item.info || "",
+    color: item.color,
+    geo: normalizeGeo(item.geo),
+  }));
+  const placed = accumulateIntervals(source);
+  const ended = Boolean(hole?.ended);
+  const issues = auditIntervals(placed);
+  let advance = 0;
+  let recovery = 0;
+  let lostValid = 0;
+  let lostClosed = true;
+  let partial = 0;
+  let zero = 0;
+  let invalid = 0;
+  const rows = placed.map((interval) => {
+    advance += interval.avancoMm;
+    recovery += interval.recuperacaoMm;
+    const valid = interval.avancoMm > 0 && interval.recuperacaoMm >= 0 && interval.recuperacaoMm <= interval.avancoMm;
+    const lostMm = valid ? interval.avancoMm - interval.recuperacaoMm : null;
+    if (!valid) {
+      lostClosed = false;
+      invalid += 1;
+    } else lostValid += lostMm;
+    if (valid && interval.recuperacaoMm === 0) zero += 1;
+    else if (valid && lostMm > 0) partial += 1;
+    const place = bulletinPlace(interval);
+    return {
+      id: interval.id,
+      n: interval.index + 1,
+      from: formatMeters(interval.profundidadeInicialMm),
+      to: formatMeters(interval.profundidadeFinalMm),
+      depth: depthSpan(interval),
+      advanceMm: interval.avancoMm,
+      recoveryMm: interval.recuperacaoMm,
+      lostMm,
+      advance: formatMeters(interval.avancoMm),
+      recovery: formatMeters(interval.recuperacaoMm),
+      lost: lostMm == null ? "—" : formatMeters(lostMm),
+      ratio: formatRatio(interval.avancoMm, interval.recuperacaoMm),
+      pct: interval.avancoMm > 0 ? (interval.recuperacaoMm / interval.avancoMm) * 100 : null,
+      boxes: joinList(place.boxes),
+      channels: joinList(place.channels),
+      core: place.core,
+      marker: place.marker,
+      info: interval.info || "",
+      geo: interval.geo,
+      colorName: materialName(normalizeHex(interval.color)),
+      tone: bulletinTone(interval),
+      valid,
+    };
+  });
+  const slices = meterSlices(placed).map((slice) => ({
+    from: slice.from,
+    to: slice.to,
+    advance: slice.advance,
+    recovery: slice.recovery,
+    lost: slice.recovery <= slice.advance + 1e-6 ? Math.max(0, slice.advance - slice.recovery) : null,
+    pct: slice.pct,
+    label: `${metersLabel(slice.from)}–${formatMeters(slice.to)}`,
+  }));
+  const fim = fimMarker(placed, ended);
+  const validRows = rows.filter((row) => row.valid && row.pct != null);
+  let extreme = null;
+  if (validRows.length) {
+    const best = validRows.reduce((pick, row) => (row.pct > pick.pct ? row : pick));
+    const worst = validRows.reduce((pick, row) => (row.pct < pick.pct ? row : pick));
+    extreme = {
+      best,
+      worst,
+      same: validRows.every((row) => row.pct === validRows[0].pct),
+      count: validRows.length,
+    };
+  }
+  const when = generatedAt instanceof Date && !Number.isNaN(generatedAt.getTime()) ? generatedAt : new Date();
+  return {
+    name: String(hole?.name || "").trim(),
+    ended,
+    generatedAt: when.toISOString(),
+    boxCount: boxesFor(placed, ended),
+    channelCount: bulletinChannels(placed, ended),
+    stats: {
+      advance,
+      recovery,
+      lost: lostClosed ? lostValid : null,
+      lostValid,
+      validCount: rows.length - invalid,
+      partial,
+      zero,
+      invalid,
+      count: rows.length,
+      depth: placed.length ? placed[placed.length - 1].profundidadeFinalMm : 0,
+    },
+    rows,
+    slices,
+    issues,
+    checks: BULLETIN_CHECKS,
+    fim: fim ? { box: fim.box + 1, channel: fim.channel + 1 } : null,
+    extreme,
+    described: rows.filter((row) => !geoIsEmpty(row.geo) || row.info).length,
+    placed,
+    boxIndexes: [...Array(boxesFor(placed, ended)).keys()],
+  };
+}
+
+function bulletinNarrative(model) {
+  const stats = model.stats;
+  const who = model.name
+    ? `A sondagem ${model.name}`
+    : "Esta sondagem não tem código no campo Furo";
+  const lead = [`${who} tem profundidade registrada de ${formatMeters(stats.depth)} e avanço acumulado de ${formatMeters(stats.advance)}.`];
+  if (stats.advance === stats.depth) lead.push("A profundidade final é a soma dos avanços lançados.");
+  if (stats.advance > 0) {
+    lead.push(`A recuperação acumulada é ${formatMeters(stats.recovery)}, correspondente a ${formatRatio(stats.advance, stats.recovery)} do avanço.`);
+  }
+  if (stats.lost == null) {
+    lead.push(`${nText(stats.invalid, "manobra tem registro inválido", "manobras têm registro inválido")}. O comprimento não recuperado do furo inteiro não fecha. Nos ${nText(stats.validCount, "intervalo válido", "intervalos válidos")}, a diferença soma ${formatMeters(stats.lostValid)}.`);
+  } else {
+    lead.push(`O comprimento não recuperado, avanço menos recuperação, soma ${formatMeters(stats.lost)}.`);
+  }
+  lead.push(`São ${nText(stats.count, "intervalo", "intervalos")}, em ${nText(model.boxCount, "caixa", "caixas")}.`);
+  if (stats.zero) lead.push(`${nText(stats.zero, "manobra tem", "manobras têm")} recuperação zero.`);
+  if (stats.partial) lead.push(`${nText(stats.partial, "manobra tem", "manobras têm")} recuperação parcial.`);
+  if (model.ended) lead.push("O furo está marcado como encerrado. O marcador FIM não entra no avanço, na recuperação nem na profundidade.");
+
+  const close = [lead[0]];
+  if (stats.advance > 0) close.push(`A recuperação global é ${formatMeters(stats.recovery)} (${formatRatio(stats.advance, stats.recovery)} do avanço).`);
+  if (model.extreme && model.extreme.count > 1 && !model.extreme.same) {
+    close.push(`Entre as manobras válidas, a maior recuperação percentual é ${model.extreme.best.ratio} em ${model.extreme.best.depth}. A menor é ${model.extreme.worst.ratio} em ${model.extreme.worst.depth}.`);
+  } else if (model.extreme && model.extreme.same && model.extreme.count > 1) {
+    close.push(`As manobras válidas têm a mesma recuperação percentual, ${model.extreme.best.ratio}.`);
+  } else if (model.extreme && model.extreme.count === 1) {
+    close.push(`A única manobra válida recuperou ${model.extreme.best.ratio}.`);
+  }
+  if (stats.zero || stats.partial) {
+    close.push("Onde houve perda, o registro não guarda o ponto exato dentro da manobra. A posição na caixa segue o testemunho recuperado.");
+  }
+  if (stats.lost != null) close.push(`A perda somada é ${formatMeters(stats.lost)}.`);
+  if (model.issues.length) close.push(`${nText(model.issues.length, "erro foi encontrado", "erros foram encontrados")} nas verificações. Os dados não foram corrigidos.`);
+  else close.push("As verificações executadas não encontraram erro de avanço, recuperação, sequência de profundidade ou sobreposição na caixa.");
+  if (!model.described) close.push("Nenhum intervalo tem descrição geológica ou informação de campo.");
+  else close.push(`${nText(model.described, "intervalo tem", "intervalos têm")} informação de campo ou descrição geológica.`);
+  close.push("Este texto só resume os registros do Pandora. Não interpreta geologia, teor ou potencial mineral. Qualquer conclusão além destes números depende de avaliação profissional.");
+  return { lead: lead.join(" "), conclusion: close.join(" ") };
 }
 
 if (typeof module !== "undefined" && module.exports) {

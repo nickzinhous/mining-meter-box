@@ -1677,6 +1677,56 @@ html.resume-work body.is-home #home-open {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+.zoom-bar .meter-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.12rem 0.4rem 0.12rem 0.55rem;
+  background: transparent;
+}
+
+.zoom-bar .meter-switch:hover,
+.zoom-bar .meter-switch[aria-pressed="true"] {
+  background: transparent;
+}
+
+.meter-switch-label {
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.meter-switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 1.72rem;
+  height: 0.98rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 28%, transparent);
+}
+
+.meter-switch-knob {
+  position: absolute;
+  top: 0.13rem;
+  left: 0.13rem;
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.meter-switch[aria-pressed="true"] .meter-switch-track {
+  background: var(--accent);
+}
+
+.meter-switch[aria-pressed="true"] .meter-switch-knob {
+  transform: translateX(0.74rem);
+  background: #fff;
+  box-shadow: none;
+}
+
 #zoom-label {
   min-width: 3.1rem;
   padding: 0 0.35rem;
@@ -1703,6 +1753,10 @@ html.resume-work body.is-home #home-open {
 
 .meter-marks {
   pointer-events: none;
+}
+
+.tray-svg.meters-off .meter-marks {
+  display: none;
 }
 
 .tray-svg.is-zoomed {

@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=38" />
+    <link rel="stylesheet" href="styles.css?v=40" />
     <style>
       .login-screen {
         position: fixed;
@@ -423,6 +423,10 @@
               <button type="button" id="zoom-reset" title="Atalho: 0">Ver tudo</button>
               <span id="zoom-label">100%</span>
               <button type="button" id="tray-expand" aria-pressed="false">Ampliar</button>
+              <button type="button" id="meter-toggle" class="meter-switch" role="switch" aria-checked="true" aria-pressed="true" title="Mostrar ou ocultar a marcação de metro a metro">
+                <span class="meter-switch-label">Metros</span>
+                <span class="meter-switch-track" aria-hidden="true"><span class="meter-switch-knob"></span></span>
+              </button>
             </div>
             <div id="box-rail" class="box-rail" role="toolbar" aria-label="Caixas" hidden></div>
             <input id="interval-photo-file" type="file" accept="image/*" hidden />
@@ -504,6 +508,6 @@
       </form>
     </dialog>
     <article id="print-sheet" class="print-sheet"></article>
-    <script src="app.js?v=39"></script>
+    <script src="app.js?v=41"></script>
   </body>
 </html>
