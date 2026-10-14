@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=55" />
+    <link rel="stylesheet" href="styles.css?v=59" />
     <style>
       .login-screen {
         position: fixed;
@@ -95,24 +95,28 @@
             </span>
           </button>
         </div>
-        <div class="session">
+        <div class="header-context">
             <button type="button" id="home-open" class="btn-logout">Sondagens</button>
             <label class="hole-field">
               <span>Furo</span>
               <input id="hole-id" type="text" maxlength="32" placeholder="F-001" autocomplete="off" />
             </label>
+        </div>
+        <div class="session">
             <div id="hole-menu" class="hole-menu">
               <button type="button" id="hole-menu-open" class="btn-logout" aria-expanded="false" aria-controls="log-actions">
                 Ações
               </button>
               <div id="log-actions" class="hole-menu-panel" hidden>
                 <div class="menu-group">
+                  <p class="menu-label">Lançamento</p>
                   <button type="button" id="repeat-last" class="btn-quiet" disabled>Repetir último</button>
                   <button type="button" id="undo-log" class="btn-quiet" disabled>Desfazer</button>
                   <button type="button" id="copy-report" class="btn-quiet" disabled>Copiar resumo</button>
                   <button type="button" id="fim-toggle" class="btn-quiet" aria-pressed="false">Fim de furo</button>
                 </div>
                 <div class="menu-group">
+                  <p class="menu-label">Arquivo</p>
                   <button type="button" id="download-hole" class="btn-quiet" disabled>Baixar furo</button>
                   <button type="button" id="download-table" class="btn-quiet" disabled title="CSV com separador ponto e vírgula, para abrir no Excel">Baixar tabela</button>
                   <button type="button" id="print-hole" class="btn-quiet">Imprimir caixas</button>
@@ -123,8 +127,12 @@
                   <button type="button" id="import-hole" class="btn-quiet">Abrir arquivo</button>
                 </div>
                 <div class="menu-group">
+                  <p class="menu-label">Furo</p>
                   <button type="button" id="clear-hole" class="btn-quiet is-danger" disabled>Limpar furo</button>
                   <button type="button" id="hole-delete" class="btn-quiet is-danger">Excluir furo</button>
+                </div>
+                <div class="menu-group">
+                  <p class="menu-label">Preferências</p>
                   <button type="button" id="geo-toggle" class="btn-quiet" aria-pressed="false">Ativar descrição geológica</button>
                   <button type="button" id="shortcuts-open" class="btn-quiet">Atalhos</button>
                 </div>
@@ -156,8 +164,10 @@
                 </p>
               </div>
             </div>
-            <span id="current-user" class="current-user"></span>
-            <button type="button" id="logout-btn" class="btn-logout">Sair</button>
+            <div class="account">
+              <span id="current-user" class="current-user"></span>
+              <button type="button" id="logout-btn" class="btn-logout">Sair</button>
+            </div>
         </div>
       </header>
 
@@ -371,7 +381,7 @@
 
           <p id="accum-summary" class="accum-summary" hidden></p>
 
-          <section class="side-block">
+          <section class="side-block list-block">
           <h2 class="list-title">
             <svg class="title-icon" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M3 4.5h10M3 8h10M3 11.5h7" />
