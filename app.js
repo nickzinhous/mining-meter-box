@@ -269,6 +269,41 @@ function estimateDepthUm(interval, offsetMm) {
   return depthUmFromTape(interval, Math.round(capped * 1000));
 }
 
+/** Metro inteiro da profundidade, no ponto físico em que ele cai na caixa. */
+function meterMarkPositions(intervals) {
+  if (!intervals.length) return [];
+  const end = intervals[intervals.length - 1].profundidadeFinalMm;
+  const max = Math.floor(end / 1000);
+  const marks = [];
+  for (let meter = 1; meter <= max; meter += 1) {
+    const depthMm = meter * 1000;
+    const closed = intervals.find((interval) => interval.profundidadeFinalMm === depthMm);
+    const interval = closed || findIntervalAtDepth(intervals, depthMm);
+    if (!interval) continue;
+    let physicalMm = interval.physicalFinalMm;
+    if (interval.recuperacaoMm > 0) {
+      const tapeUm = tapeUmFromDepth(interval, depthMm);
+      if (tapeUm == null) continue;
+      physicalMm = interval.physicalInicialMm + tapeUm / 1000;
+    }
+    const lengthMm = LENGTH * MM;
+    let channelIndex = Math.floor(Math.max(0, physicalMm) / lengthMm);
+    let localMm = physicalMm - channelIndex * lengthMm;
+    if (localMm === 0 && physicalMm > 0 && channelIndex > 0) {
+      channelIndex -= 1;
+      localMm = lengthMm;
+    }
+    const localCm = localMm / MM;
+    marks.push({
+      meter,
+      box: Math.floor(channelIndex / CHANNELS),
+      channel: channelIndex % CHANNELS,
+      localCm: Math.min(LENGTH, Math.max(0, localCm)),
+    });
+  }
+  return marks;
+}
+
 function findIntervalAtRecovery(intervals, recoveryMm) {
   let lastWithCore = null;
   for (let i = 0; i < intervals.length; i++) {
@@ -764,7 +799,61 @@ function buildTopView() {
     for (let i = 0; i < count; i++) drawBox(root, i);
   }
 
+  drawMeterMarks(root, currentIntervals());
   applyCamera();
+}
+
+function drawMeterMarks(parent, intervals) {
+  const marks = meterMarkPositions(intervals);
+  if (!marks.length) return;
+  const group = el("g", { class: "meter-marks" });
+  const placed = [];
+  for (const mark of marks) {
+    const box = layout.boxes[mark.box];
+    if (!box) continue;
+    const x = box.channelX[mark.channel];
+    if (x == null) continue;
+    const y = yFromBase(box.y0, mark.localCm);
+    const digits = String(mark.meter).length;
+    const size = 1;
+    const fontSize = digits >= 3 ? 0.32 : digits === 2 ? 0.42 : 0.55;
+    const key = `${mark.box}:${mark.channel}:${Math.round(y * 20)}`;
+    let shift = 0;
+    while (placed.some((item) => item.key === key && item.shift === shift)) shift += 1;
+    placed.push({ key, shift });
+    const sx = x - 0.1 - size - shift;
+    const sy = y;
+    const chip = el("g");
+    const title = el("title");
+    title.textContent = `${mark.meter} m`;
+    chip.appendChild(title);
+    chip.appendChild(
+      el("rect", {
+        x: sx,
+        y: sy,
+        width: size,
+        height: size,
+        fill: "var(--box-ink)",
+        stroke: "var(--box)",
+        "stroke-width": 1,
+        "vector-effect": "non-scaling-stroke",
+      }),
+    );
+    const label = el("text", {
+      x: sx + size / 2,
+      y: y + size / 2,
+      "text-anchor": "middle",
+      "dominant-baseline": "middle",
+      fill: "var(--box)",
+      "font-size": fontSize,
+      "font-weight": "650",
+      "font-family": "Inter, Segoe UI, system-ui, sans-serif",
+    });
+    label.textContent = String(mark.meter);
+    chip.appendChild(label);
+    group.appendChild(chip);
+  }
+  parent.appendChild(group);
 }
 
 function renderCores(intervals) {
@@ -4321,6 +4410,7 @@ if (typeof module !== "undefined" && module.exports) {
     meterSlices,
     auditIntervals,
     fimMarker,
+    meterMarkPositions,
     normalizeGeo,
     geoIsEmpty,
   };

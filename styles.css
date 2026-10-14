@@ -1701,6 +1701,10 @@ html.resume-work body.is-home #home-open {
     var(--stage);
 }
 
+.meter-marks {
+  pointer-events: none;
+}
+
 .tray-svg.is-zoomed {
   touch-action: none;
   cursor: grab;
