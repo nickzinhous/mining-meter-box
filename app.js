@@ -354,6 +354,15 @@ function intervalBlock(interval) {
   return placement(interval.physicalFinalMm);
 }
 
+/** Marcador de encerramento. Não é manobra: não soma avanço, recuperação nem profundidade. */
+function fimMarker(intervals, ended) {
+  if (!ended || !intervals?.length) return null;
+  const last = intervals[intervals.length - 1];
+  const block = intervalBlock(last);
+  if (!block) return null;
+  return placeZeroRecovery(block.topEnd * MM);
+}
+
 function recoverySegments(startMm, endMm) {
   const lengthMm = LENGTH * MM;
   const segments = [];
@@ -413,7 +422,7 @@ function currentIntervals() {
   return accumulateIntervals(taquinhos);
 }
 
-function boxesFor(intervals) {
+function boxesFor(intervals, ended) {
   let maxBox = 0;
   let any = false;
   for (const interval of intervals) {
@@ -422,11 +431,16 @@ function boxesFor(intervals) {
     any = true;
     maxBox = Math.max(maxBox, block.box);
   }
+  const fim = fimMarker(intervals, ended);
+  if (fim) {
+    any = true;
+    maxBox = Math.max(maxBox, fim.box);
+  }
   return any ? maxBox + 1 : 0;
 }
 
 function boxCount() {
-  return Math.max(1, boxesFor(currentIntervals()));
+  return Math.max(1, boxesFor(currentIntervals(), Boolean(currentHole()?.ended)));
 }
 
 function boxOrigin(index) {
@@ -809,68 +823,78 @@ function renderCores(intervals) {
   });
 }
 
+function appendTaquinho(root, place, id, lines, titleText, picked) {
+  const box = layout.boxes[place.box];
+  if (!box) return;
+  const left = box.channelX[place.channel];
+  if (left == null) return;
+  const localTop = place.topStart - place.slotStart;
+  const localBody = place.bodyStart - place.slotStart;
+  const topY = yFromBase(box.y0, localTop + TOP_LEN);
+  const bodyY = yFromBase(box.y0, localBody + BODY_LEN);
+  const g = el("g", {
+    class: picked ? "taquinho is-picked" : "taquinho",
+    "data-id": id,
+    "data-label": lines.join("|"),
+    "pointer-events": "none",
+  });
+  const title = el("title");
+  title.textContent = titleText;
+  g.appendChild(title);
+  g.appendChild(
+    el("rect", {
+      class: "taquinho-block",
+      x: left,
+      y: topY,
+      width: xu(CHANNEL_W),
+      height: TOP_LEN,
+      fill: "var(--taquinho)",
+      stroke: "var(--taquinho-ink)",
+      "stroke-width": 1,
+      "vector-effect": "non-scaling-stroke",
+      rx: 0.08,
+    }),
+  );
+  g.appendChild(
+    el("rect", {
+      x: left,
+      y: bodyY,
+      width: xu(CHANNEL_W),
+      height: BODY_LEN,
+      fill: "var(--taquinho-ink)",
+      opacity: 0.16,
+    }),
+  );
+  root.appendChild(g);
+}
+
 function renderTaquinhos(intervals) {
   const root = document.getElementById("taquinhos-root");
   if (!root) return;
   root.replaceChildren();
 
-  const yBoxes = layout.boxes;
-
   for (const t of intervals) {
     const place = intervalBlock(t);
-    const box = yBoxes[place.box];
-    if (!box) continue;
-    const left = box.channelX[place.channel];
-    if (left == null) continue;
-    const cx = left;
-    const localTop = place.topStart - place.slotStart;
-    const localBody = place.bodyStart - place.slotStart;
-    const topY = yFromBase(box.y0, localTop + TOP_LEN);
-    const bodyY = yFromBase(box.y0, localBody + BODY_LEN);
+    if (!place) continue;
     const lines = [
       `A: ${formatMeters(t.avancoMm)}`,
       `R: ${formatMeters(t.recuperacaoMm)}`,
       `P: ${depthSpan(t)}`,
     ];
     if (t.geo?.litologia) lines.push(t.geo.litologia);
-
-    const g = el("g", {
-      class: t.id === selectedId ? "taquinho is-picked" : "taquinho",
-      "data-id": t.id,
-      "data-label": lines.join("|"),
-      "pointer-events": "none",
-    });
-    const title = el("title");
-    title.textContent = `Avanço ${lines[0].slice(3)}. Recuperação ${lines[1].slice(3)}. Profundidade ${lines[2].slice(3)}.`;
-    g.appendChild(title);
-
-    g.appendChild(
-      el("rect", {
-        class: "taquinho-block",
-        x: cx,
-        y: topY,
-        width: xu(CHANNEL_W),
-        height: TOP_LEN,
-        fill: "var(--taquinho)",
-        stroke: "var(--taquinho-ink)",
-        "stroke-width": 1,
-        "vector-effect": "non-scaling-stroke",
-        rx: 0.08,
-      }),
+    appendTaquinho(
+      root,
+      place,
+      t.id,
+      lines,
+      `Avanço ${lines[0].slice(3)}. Recuperação ${lines[1].slice(3)}. Profundidade ${lines[2].slice(3)}.`,
+      t.id === selectedId,
     );
+  }
 
-    g.appendChild(
-      el("rect", {
-        x: cx,
-        y: bodyY,
-        width: xu(CHANNEL_W),
-        height: BODY_LEN,
-        fill: "var(--taquinho-ink)",
-        opacity: 0.16,
-      }),
-    );
-
-    root.appendChild(g);
+  const fim = fimMarker(intervals, Boolean(currentHole()?.ended));
+  if (fim) {
+    appendTaquinho(root, fim, "fim", ["FIM"], "Fim de furo", false);
   }
 
   layoutTaquinhoFaces();
@@ -1902,6 +1926,7 @@ function labelValue(line) {
 }
 
 function labelCandidates(lines) {
+  if (!lines || lines.length < 3) return [lines || []];
   const short = (line) => line.replace(/\s*m$/, "");
   const tight = (line) => labelValue(line).replace(/,00/g, "");
   const a = tight(lines[0]);
@@ -2550,6 +2575,7 @@ function sanitizeHole(raw) {
     id: typeof raw.id === "string" && raw.id ? raw.id : crypto.randomUUID(),
     name: String(raw.name || "").slice(0, 32),
     items: sanitizeStored(raw.items),
+    ended: raw.ended === true,
   };
 }
 
@@ -2597,8 +2623,9 @@ function renderHoleStatus(intervals) {
     }
   }
   if (next) {
+    const fimNote = currentHole()?.ended ? " Fim de furo marcado." : "";
     next.textContent = last
-      ? `Próximo intervalo começa em ${formatMeters(last.profundidadeFinalMm)}.`
+      ? `Próximo intervalo começa em ${formatMeters(last.profundidadeFinalMm)}.${fimNote}`
       : "O primeiro intervalo começa em 0,00 m.";
   }
   syncLogActions();
@@ -2619,6 +2646,13 @@ function syncLogActions() {
   if (download) download.disabled = !hasItems;
   if (table) table.disabled = !hasItems;
   if (clear) clear.disabled = !hasItems;
+  const fim = document.getElementById("fim-toggle");
+  if (fim) {
+    const on = Boolean(currentHole()?.ended);
+    fim.setAttribute("aria-pressed", on ? "true" : "false");
+    fim.textContent = on ? "Desmarcar fim de furo" : "Fim de furo";
+    fim.classList.toggle("is-on", on);
+  }
 }
 
 function refreshHoleSelect() {
@@ -2644,7 +2678,7 @@ function holeFacts(hole) {
     recovery: formatMeters(last.recuperacaoFinalMm),
     ratio: formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm),
     pct,
-    boxes: boxesFor(intervals),
+    boxes: boxesFor(intervals, hole.ended),
   };
 }
 
@@ -2828,6 +2862,12 @@ function renderHome() {
       badge.textContent = "Aberto";
       name.appendChild(badge);
     }
+    if (row.hole.ended) {
+      const fimBadge = document.createElement("span");
+      fimBadge.className = "survey-badge";
+      fimBadge.textContent = "Fim";
+      name.appendChild(fimBadge);
+    }
     const facts = holeFacts(row.hole);
     const depth = surveyFact("Profundidade", facts ? facts.depth : "—", facts ? "" : "is-empty");
     const recovery = surveyFact(
@@ -2992,6 +3032,8 @@ function usedChannels(intervals) {
       maxIndex = Math.max(maxIndex, seg.channelIndex);
     }
   }
+  const fim = fimMarker(intervals, Boolean(currentHole()?.ended));
+  if (fim) maxIndex = Math.max(maxIndex, fim.box * CHANNELS + fim.channel);
   return maxIndex + 1;
 }
 
@@ -3071,6 +3113,21 @@ function applyGeoForm() {
     button.textContent = on ? "Desativar descrição geológica" : "Ativar descrição geológica";
     button.classList.toggle("is-on", on);
   }
+}
+
+function setHoleEnded(on) {
+  const hole = currentHole();
+  if (!hole) return;
+  if (on && !taquinhos.length) {
+    showError("Lance um intervalo antes de marcar o fim do furo.");
+    return;
+  }
+  hole.ended = Boolean(on);
+  showError("");
+  showNote(on
+    ? "Fim de furo marcado. O taquinho FIM não entra no avanço, na recuperação nem na profundidade."
+    : "Fim de furo desmarcado.");
+  renderAll();
 }
 
 function setGeoFormEnabled(on) {
@@ -3674,6 +3731,7 @@ function reportText() {
     "",
   ];
   for (const interval of intervals) lines.push(intervalLine(interval));
+  if (currentHole()?.ended) lines.push("Fim de furo");
   return lines.join("\n");
 }
 
@@ -3752,7 +3810,9 @@ function downloadHole() {
   const hole = currentHole();
   if (!hole || !taquinhos.length) return;
   persistHoles();
-  const blob = new Blob([JSON.stringify({ name: hole.name, items: hole.items }, null, 2)], {
+  const payload = { name: hole.name, items: hole.items };
+  if (hole.ended) payload.ended = true;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   });
   const link = document.createElement("a");
@@ -3783,6 +3843,7 @@ function importHoleFile(file) {
         id: crypto.randomUUID(),
         name: String(raw?.name || raw?.furo || "Importado").slice(0, 32),
         items,
+        ended: raw?.ended === true,
       };
       holes.push(hole);
       activeHoleId = hole.id;
@@ -3912,6 +3973,12 @@ async function fillPrintSheet(mode) {
   }
   table.appendChild(tbody);
   sheet.append(h1, h2, summary, table);
+  const fim = fimMarker(intervals, Boolean(currentHole()?.ended));
+  if (fim && (mode !== "sheet" || fim.box === boxIndex)) {
+    const fimNote = document.createElement("p");
+    fimNote.textContent = `Fim de furo. Taquinho FIM na caixa ${fim.box + 1}, canaleta ${fim.channel + 1}. Não altera avanço, recuperação nem profundidade.`;
+    sheet.append(fimNote);
+  }
   const issues = auditIntervals(intervals).filter((issue) => issue.level === "erro");
   if (issues.length) {
     const issuesTitle = document.createElement("h2");
@@ -4172,6 +4239,9 @@ function bindChrome() {
   document.getElementById("geo-toggle")?.addEventListener("click", () => {
     setGeoFormEnabled(!geoFormEnabled());
   });
+  document.getElementById("fim-toggle")?.addEventListener("click", () => {
+    setHoleEnded(!currentHole()?.ended);
+  });
   document.getElementById("view-solo")?.addEventListener("click", () => {
     soloBox = !soloBox;
     const button = document.getElementById("view-solo");
@@ -4250,6 +4320,7 @@ if (typeof module !== "undefined" && module.exports) {
     depthSpan,
     meterSlices,
     auditIntervals,
+    fimMarker,
     normalizeGeo,
     geoIsEmpty,
   };
