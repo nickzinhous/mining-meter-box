@@ -1231,7 +1231,7 @@ function renderList(intervals) {
     const where = place
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
       : "Sem testemunho na caixa";
-    const depth = depthSpan(t);
+    const depth = formatTaquinhoSpan(t.profundidadeInicialMm, t.profundidadeFinalMm);
     const recovered = hasCore
       ? `${metersLabel(t.physicalInicialMm)}–${formatMeters(t.physicalFinalMm)}`
       : place
@@ -1259,8 +1259,8 @@ function renderList(intervals) {
       </button>
       <div class="card-panel">
         <dl class="specs">
-          <div class="spec-line"><dt>Avanço</dt><dd>${formatMeters(t.avancoMm)}</dd></div>
-          <div class="spec-line"><dt>Recuperação</dt><dd>${formatMeters(t.recuperacaoMm)}</dd></div>
+          <div class="spec-line"><dt>Avanço</dt><dd>${formatTaquinhoMeters(t.avancoMm)}</dd></div>
+          <div class="spec-line"><dt>Recuperação</dt><dd>${formatTaquinhoMeters(t.recuperacaoMm)}</dd></div>
           <div class="spec-line"><dt>Percentual</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
           <div class="spec-line"><dt>Na caixa</dt><dd>${recovered}</dd></div>
           <div class="spec-line"><dt>Posição</dt><dd>${where}</dd></div>
@@ -2390,9 +2390,9 @@ function showTagTip(interval, clientX, clientY) {
   tip.replaceChildren();
   const dl = document.createElement("dl");
   const place = intervalBlock(interval);
-  tipRow(dl, "A · Avanço", formatMeters(interval.avancoMm));
-  tipRow(dl, "R · Recuperação", formatMeters(interval.recuperacaoMm));
-  tipRow(dl, "P · Profundidade", depthSpan(interval));
+  tipRow(dl, "A · Avanço", formatTaquinhoMeters(interval.avancoMm));
+  tipRow(dl, "R · Recuperação", formatTaquinhoMeters(interval.recuperacaoMm));
+  tipRow(dl, "P · Profundidade", formatTaquinhoSpan(interval.profundidadeInicialMm, interval.profundidadeFinalMm));
   if (place) tipRow(dl, "Na caixa", `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`);
   if (interval.info) tipRow(dl, "Informação", interval.info);
   tip.appendChild(dl);
@@ -3668,9 +3668,9 @@ function renderIntervalPanel() {
     body.replaceChildren();
     const place = intervalBlock(interval);
     const rows = [
-      ["Profundidade", depthSpan(interval)],
-      ["Avanço", formatMeters(interval.avancoMm)],
-      ["Recuperação", formatMeters(interval.recuperacaoMm)],
+      ["Profundidade", formatTaquinhoSpan(interval.profundidadeInicialMm, interval.profundidadeFinalMm)],
+      ["Avanço", formatTaquinhoMeters(interval.avancoMm)],
+      ["Recuperação", formatTaquinhoMeters(interval.recuperacaoMm)],
       ["Percentual", formatRatio(interval.avancoMm, interval.recuperacaoMm)],
       ["Na caixa", place ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}` : "Sem testemunho"],
     ];

@@ -42,6 +42,8 @@ check("até 2 cm acima do avanço fica na caixa e o taquinho mostra o arredondad
   assert.strictEqual(placed[0].recuperacaoMm, 1020);
   assert.strictEqual(placed[0].physicalFinalMm - placed[0].physicalInicialMm, 1020);
   assert.strictEqual(placed[0].profundidadeFinalMm, 1000);
+  assert.strictEqual(app.formatTaquinhoMeters(1000), "1,00 m");
+  assert.strictEqual(app.formatTaquinhoMeters(1010), "1,00 m");
   assert.strictEqual(app.formatTaquinhoMeters(1020), "1,00 m");
   assert.strictEqual(app.formatTaquinhoMeters(980), "1,00 m");
   const real = app.accumulateIntervals([interval(1000, 980, "b")]);
