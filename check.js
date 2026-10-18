@@ -28,9 +28,47 @@ check("o zero da canaleta fica na base", () => {
 });
 
 check("recuperação maior que o avanço é recusada", () => {
-  assert.strictEqual(app.recoveryExceedsAdvance(1000, 1001), true);
+  assert.strictEqual(app.recoveryExceedsAdvance(1000, 1030), true);
+  assert.strictEqual(app.recoveryExceedsAdvance(1000, 1050), true);
+  assert.strictEqual(app.recoveryExceedsAdvance(1000, 1020), false);
+  assert.strictEqual(app.recoveryExceedsAdvance(1000, 1010), false);
   assert.strictEqual(app.recoveryExceedsAdvance(1000, 1000), false);
+  assert.strictEqual(app.recoveryExceedsAdvance(1000, 980), false);
   assert.strictEqual(app.recoveryExceedsAdvance(1000, 0), false);
+});
+
+check("até 2 cm acima do avanço fica na caixa e o taquinho mostra o arredondado", () => {
+  const placed = app.accumulateIntervals([interval(1000, 1020, "a")]);
+  assert.strictEqual(placed[0].recuperacaoMm, 1020);
+  assert.strictEqual(placed[0].physicalFinalMm - placed[0].physicalInicialMm, 1020);
+  assert.strictEqual(placed[0].profundidadeFinalMm, 1000);
+  assert.strictEqual(app.formatTaquinhoMeters(1020), "1,00 m");
+  assert.strictEqual(app.formatTaquinhoMeters(980), "1,00 m");
+  const real = app.accumulateIntervals([interval(1000, 980, "b")]);
+  assert.strictEqual(real[0].physicalFinalMm - real[0].physicalInicialMm, 980);
+});
+
+check("1 cm no fim da caixa não recebe material e 2 cm ainda recebem", () => {
+  assert.strictEqual(app.skipMinimumBoxRemainder(2990), 3000);
+  assert.strictEqual(app.skipMinimumBoxRemainder(5990), 6000);
+  assert.strictEqual(app.skipMinimumBoxRemainder(2980), 2980);
+  assert.strictEqual(app.skipMinimumBoxRemainder(2970), 2970);
+  assert.strictEqual(app.skipMinimumBoxRemainder(3000), 3000);
+  const tight = app.accumulateIntervals([
+    interval(4000, 2990, "a"),
+    interval(1000, 500, "b"),
+  ]);
+  assert.strictEqual(tight[0].physicalFinalMm, 2990);
+  assert.ok(tight[1].physicalInicialMm >= 3000);
+  assert.strictEqual(tight[1].physicalFinalMm - tight[1].physicalInicialMm, 500);
+  assert.strictEqual(tight[1].profundidadeInicialMm, 4000);
+  const room = app.accumulateIntervals([
+    interval(4000, 2980, "a"),
+    interval(1000, 100, "b"),
+  ]);
+  assert.strictEqual(room[1].physicalInicialMm, 2980);
+  assert.strictEqual(room[1].physicalFinalMm - room[1].physicalInicialMm, 100);
+  assert.strictEqual(room[1].profundidadeInicialMm, 4000);
 });
 
 check("um metro recuperado marca o metro 1 no topo da primeira canaleta", () => {

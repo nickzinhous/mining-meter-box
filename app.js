@@ -12,6 +12,8 @@ const OVERHANG = (TOP_LEN - BODY_LEN) / 2;
 
 const totalW = WALL_W * 2 + CHANNELS * CHANNEL_W + (CHANNELS - 1) * DIVIDER_W;
 const MM = 10;
+const ESPACO_MINIMO_CAIXA = 0.01;
+const TOLERANCIA_RECUPERACAO = 0.02;
 const MATERIAL_COLORS = [
   { name: "Branco", hex: "#efeae2" },
   { name: "Cinza claro", hex: "#c5c1b8" },
@@ -150,11 +152,11 @@ function auditIntervals(intervals) {
     if (item.recuperacaoMm < 0) {
       issues.push({ level: "erro", id: item.id, text: `${label}: a recuperação não pode ser negativa.` });
     }
-    if (item.recuperacaoMm > item.avancoMm) {
+    if (recoveryExceedsAdvance(item.avancoMm, item.recuperacaoMm)) {
       issues.push({
         level: "erro",
         id: item.id,
-        text: `${label}: Erro de validação: a recuperação não pode ser maior que o avanço da manobra. Verifique os valores informados antes de continuar.`,
+        text: `${label}: ${RECOVERY_LIMIT_MESSAGE}`,
       });
     }
     if (item.profundidadeFinalMm < item.profundidadeInicialMm) {
@@ -397,10 +399,28 @@ function findIntervalAtRecovery(intervals, recoveryMm) {
 }
 
 const RECOVERY_LIMIT_MESSAGE =
-  "Erro de validação: a recuperação não pode ser maior que o avanço da manobra. Verifique os valores informados antes de continuar.";
+  "Erro de validação: a recuperação não pode passar do avanço em mais de 2 cm. Verifique os valores informados antes de continuar.";
+
+function cmFromMeters(meters) {
+  return Math.round(meters * 100);
+}
+
+function cmFromMm(mm) {
+  return cmFromMeters(mm / 1000);
+}
 
 function recoveryExceedsAdvance(advanceMm, recoveryMm) {
-  return recoveryMm > advanceMm;
+  return cmFromMm(recoveryMm) > cmFromMm(advanceMm) + cmFromMeters(TOLERANCIA_RECUPERACAO);
+}
+
+/** O último centímetro da caixa não recebe testemunho. O material segue na caixa seguinte. */
+function skipMinimumBoxRemainder(mm) {
+  const span = CHANNELS * LENGTH * MM;
+  const into = mm % span;
+  if (into === 0) return mm;
+  const restanteCm = cmFromMm(span - into);
+  if (restanteCm === cmFromMeters(ESPACO_MINIMO_CAIXA)) return mm + (span - into);
+  return mm;
 }
 
 /** Texto do taquinho. O arredondamento não entra no estado nem no desenho da caixa. */
@@ -434,6 +454,7 @@ function accumulateIntervals(items) {
   let occupiedMm = 0;
   let lastMarkerEndMm = 0;
   return items.map((item, index) => {
+    occupiedMm = skipMinimumBoxRemainder(occupiedMm);
     const recuperacaoInicialMm = recoveryMm;
     const recuperacaoFinalMm = recoveryMm + item.recuperacaoMm;
     const placed = {
@@ -1205,7 +1226,7 @@ function renderList(intervals) {
     const hasCore = t.recuperacaoMm > 0;
     if (!hasCore) li.classList.add("is-empty-recovery");
     else if (t.recuperacaoMm < t.avancoMm) li.classList.add("is-partial");
-    else if (t.recuperacaoMm > t.avancoMm) li.classList.add("is-excess");
+    else if (recoveryExceedsAdvance(t.avancoMm, t.recuperacaoMm)) li.classList.add("is-excess");
     const place = intervalBlock(t);
     const where = place
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
@@ -1220,7 +1241,7 @@ function renderList(intervals) {
       ? `<span class="loss-badge is-zero">Sem testemunho</span>`
       : t.recuperacaoMm < t.avancoMm
         ? `<span class="loss-badge">Perda</span>`
-        : t.recuperacaoMm > t.avancoMm
+        : recoveryExceedsAdvance(t.avancoMm, t.recuperacaoMm)
           ? `<span class="loss-badge is-excess">R &gt; A</span>`
           : "";
     const tone = ratioTone(t.avancoMm > 0 ? (t.recuperacaoMm / t.avancoMm) * 100 : null);
@@ -4066,7 +4087,7 @@ function importHoleFile(file) {
         showError("O arquivo não tem taquinhos válidos.");
         return;
       }
-      if (items.some((item) => item.recuperacaoMm > item.avancoMm)) {
+      if (items.some((item) => recoveryExceedsAdvance(item.avancoMm, item.recuperacaoMm))) {
         showError(RECOVERY_LIMIT_MESSAGE);
         return;
       }
@@ -4628,7 +4649,7 @@ function bulletinPlace(interval) {
 }
 
 function bulletinTone(interval) {
-  if (!(interval.avancoMm > 0) || interval.recuperacaoMm < 0 || interval.recuperacaoMm > interval.avancoMm) return "is-error";
+  if (!(interval.avancoMm > 0) || interval.recuperacaoMm < 0 || recoveryExceedsAdvance(interval.avancoMm, interval.recuperacaoMm)) return "is-error";
   if (interval.recuperacaoMm === 0) return "is-bad";
   const pct = (interval.recuperacaoMm / interval.avancoMm) * 100;
   if (pct < 70) return "is-bad";
@@ -4662,8 +4683,8 @@ function buildBulletinModel(items, hole, generatedAt) {
   const rows = placed.map((interval) => {
     advance += interval.avancoMm;
     recovery += interval.recuperacaoMm;
-    const valid = interval.avancoMm > 0 && interval.recuperacaoMm >= 0 && interval.recuperacaoMm <= interval.avancoMm;
-    const lostMm = valid ? interval.avancoMm - interval.recuperacaoMm : null;
+    const valid = interval.avancoMm > 0 && interval.recuperacaoMm >= 0 && !recoveryExceedsAdvance(interval.avancoMm, interval.recuperacaoMm);
+    const lostMm = valid ? Math.max(0, interval.avancoMm - interval.recuperacaoMm) : null;
     if (!valid) {
       lostClosed = false;
       invalid += 1;
@@ -4704,7 +4725,7 @@ function buildBulletinModel(items, hole, generatedAt) {
     to: slice.to,
     advance: slice.advance,
     recovery: slice.recovery,
-    lost: slice.recovery <= slice.advance + 1e-6 ? Math.max(0, slice.advance - slice.recovery) : null,
+    lost: slice.recovery <= slice.advance + TOLERANCIA_RECUPERACAO * 1000 + 1e-6 ? Math.max(0, slice.advance - slice.recovery) : null,
     pct: slice.pct,
     label: `${metersLabel(slice.from)}–${formatMeters(slice.to)}`,
   }));
@@ -4819,6 +4840,7 @@ if (typeof module !== "undefined" && module.exports) {
     fimMarker,
     meterMarkPositions,
     recoveryExceedsAdvance,
+    skipMinimumBoxRemainder,
     normalizeGeo,
     geoIsEmpty,
     buildBulletinModel,
