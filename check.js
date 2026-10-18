@@ -92,6 +92,23 @@ check("o boletim só repete o furo informado", () => {
   }
 });
 
+check("a caixa guarda a recuperação real e o taquinho só arredonda o texto", () => {
+  const placed = app.accumulateIntervals([
+    interval(1000, 980, "a"),
+    interval(3000, 2970, "b"),
+  ]);
+  assert.strictEqual(placed[0].recuperacaoMm, 980);
+  assert.strictEqual(placed[0].physicalFinalMm - placed[0].physicalInicialMm, 980);
+  assert.strictEqual(placed[1].recuperacaoMm, 2970);
+  assert.strictEqual(placed[1].physicalFinalMm - placed[1].physicalInicialMm, 2970);
+  assert.strictEqual(app.formatMeters(980), "0,98 m");
+  assert.strictEqual(app.formatMeters(2970), "2,97 m");
+  assert.strictEqual(app.formatTaquinhoMeters(980), "1,00 m");
+  assert.strictEqual(app.formatTaquinhoMeters(2970), "2,95 m");
+  assert.strictEqual(app.formatTaquinhoMeters(placed[0].avancoMm), "1,00 m");
+  assert.strictEqual(app.formatTaquinhoMeters(placed[0].profundidadeFinalMm), "1,00 m");
+});
+
 check("a profundidade da caixa arredonda o centímetro para 0 ou 5", () => {
   const um = (meters) => Math.round(meters * 1000000);
   assert.strictEqual(app.formatBoxDepth(um(2.91)), "2,90 m");

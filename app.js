@@ -400,7 +400,16 @@ const RECOVERY_LIMIT_MESSAGE =
   "Erro de validação: a recuperação não pode ser maior que o avanço da manobra. Verifique os valores informados antes de continuar.";
 
 function recoveryExceedsAdvance(advanceMm, recoveryMm) {
-  return recoveryMm > advanceMm || roundCoreMm(recoveryMm) > advanceMm;
+  return recoveryMm > advanceMm;
+}
+
+/** Texto do taquinho. O arredondamento não entra no estado nem no desenho da caixa. */
+function formatTaquinhoMeters(mm) {
+  return formatMeters(roundCoreMm(mm));
+}
+
+function formatTaquinhoSpan(startMm, endMm) {
+  return `${formatTaquinhoMeters(startMm).replace(/ m$/, "")}–${formatTaquinhoMeters(endMm)}`;
 }
 
 /** Primeiro encaixe de taquinho que termina depois de `mm`. */
@@ -939,8 +948,9 @@ function drawBoxDepths(parent, intervals, ended) {
   for (let index = 0; index < edges.length - 1; index++) {
     const box = layout.boxes[index];
     if (!box) continue;
-    const start = formatBoxDepth(edges[index]);
-    const end = formatBoxDepth(edges[index + 1]);
+    const depthLabel = (um) => (um == null || !Number.isFinite(um) ? "" : formatMeters(Math.round(um / 1000)));
+    const start = depthLabel(edges[index]);
+    const end = depthLabel(edges[index + 1]);
     if (start) {
       const bottom = el("text", {
         class: "box-depth box-depth-start",
@@ -1084,9 +1094,9 @@ function drawTaquinhos(root, intervals, ended, pickedId = selectedId) {
     const place = intervalBlock(t);
     if (!place) continue;
     const lines = [
-      `A: ${formatMeters(t.avancoMm)}`,
-      `R: ${formatMeters(t.recuperacaoMm)}`,
-      `P: ${depthSpan(t)}`,
+      `A: ${formatTaquinhoMeters(t.avancoMm)}`,
+      `R: ${formatTaquinhoMeters(t.recuperacaoMm)}`,
+      `P: ${formatTaquinhoSpan(t.profundidadeInicialMm, t.profundidadeFinalMm)}`,
     ];
     if (t.geo?.litologia) lines.push(t.geo.litologia);
     appendTaquinho(
@@ -1480,13 +1490,8 @@ function bindForm() {
       showError(RECOVERY_LIMIT_MESSAGE);
       return;
     }
-    const registeredRecovery = roundCoreMm(recuperacao.mm);
     const color = normalizeHex(data.get("cor"));
     const geo = readGeoForm(form);
-    const roundingNote =
-      registeredRecovery === recuperacao.mm
-        ? ""
-        : `Recuperação registrada como ${formatMeters(registeredRecovery)} (ajuste para múltiplo de 5 cm).`;
 
     if (editingId) {
       const current = taquinhos.find((item) => item.id === editingId);
@@ -1497,14 +1502,14 @@ function bindForm() {
       }
       snapshotLog("Taquinho editado");
       current.avancoMm = avanco.mm;
-      current.recuperacaoMm = registeredRecovery;
+      current.recuperacaoMm = recuperacao.mm;
       current.info = info;
       current.color = color;
       current.geo = geo;
       freshId = current.id;
       openCardId = current.id;
       beginEdit(null);
-      showNote(roundingNote || "Taquinho atualizado.");
+      showNote("Taquinho atualizado.");
     } else {
       snapshotLog("Taquinho adicionado");
       const id = crypto.randomUUID();
@@ -1513,12 +1518,12 @@ function bindForm() {
       taquinhos.push({
         id,
         avancoMm: avanco.mm,
-        recuperacaoMm: registeredRecovery,
+        recuperacaoMm: recuperacao.mm,
         info,
         color,
         geo,
       });
-      showNote(roundingNote);
+      showNote("");
     }
 
     clearConsulta();
@@ -4797,6 +4802,7 @@ if (typeof module !== "undefined" && module.exports) {
     yFromBase,
     formatMeters,
     roundCoreMm,
+    formatTaquinhoMeters,
     findIntervalAtDepth,
     findIntervalAtRecovery,
     tapeUmFromDepth,
