@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=59" />
+    <link rel="stylesheet" href="styles.css?v=66" />
     <style>
       .login-screen {
         position: fixed;
@@ -76,7 +76,7 @@
         </label>
         <p id="login-error" class="form-error" hidden></p>
         <button id="login-submit" type="submit" class="btn">Entrar</button>
-        <p class="login-note">O acesso fica salvo apenas neste navegador.</p>
+        <p class="login-note">O acesso e os furos ficam neste navegador. O arquivo do furo é o que segue para outro computador.</p>
       </form>
     </section>
 
@@ -227,12 +227,13 @@
         </div>
         <div class="home-sheet">
           <div class="home-heading">
-            <div>
-              <p class="home-kicker">Registro de furos</p>
+            <p class="home-kicker">Registro de furos</p>
+            <div class="home-title-line">
               <h2 id="home-title">Sondagens</h2>
-              <p class="home-lead">Abra um furo para lançar os taquinhos, ou continue o que já está neste navegador.</p>
+              <p id="home-count" class="home-count" hidden></p>
             </div>
-            <p id="home-count" class="home-count" hidden></p>
+            <p class="home-lead">Lance avanço e recuperação. A caixa sobe da base e o metro a metro é marcado sozinho.</p>
+            <p class="home-note">Protótipo em teste neste navegador. Quem faz a sondagem baixa o arquivo do furo; quem recebe abre esse arquivo e não precisa remarcar metro a metro. Fotografias não vão no arquivo.</p>
           </div>
           <div class="home-tools">
             <label class="home-search">
@@ -375,6 +376,7 @@
             <p><span>Canaletas</span><strong id="stat-channels"></strong></p>
             <p><span>Com perda</span><strong id="stat-loss"></strong></p>
           </div>
+          <p class="field-hint">O metro a metro e os números do boletim saem destes intervalos. O restante da folha fica em branco para preencher à mão. Em Ações, Baixar furo envia o arquivo; Gerar boletim técnico imprime a folha.</p>
           <ul id="lithology-legend" class="lithology-legend" hidden></ul>
           <ul id="audit-list" class="audit-list" hidden></ul>
           </section>
@@ -576,10 +578,10 @@
     <div id="bulletin-root" class="bulletin-root" hidden>
       <div class="bulletin-toolbar">
         <div class="bulletin-toolbar-row">
-          <strong>Boletim técnico</strong>
+          <strong>Boletim de sondagem</strong>
           <div class="bulletin-modes">
-            <button type="button" id="bulletin-full">Completo</button>
-            <button type="button" id="bulletin-short">Resumido</button>
+            <button type="button" id="bulletin-full">Com linhas em branco</button>
+            <button type="button" id="bulletin-short">Só as manobras</button>
           </div>
           <div class="bulletin-toolbar-actions">
             <button type="button" id="bulletin-print" class="btn">Imprimir</button>
@@ -588,14 +590,14 @@
           </div>
         </div>
         <div id="bulletin-sections" class="bulletin-sections"></div>
-        <p class="bulletin-toolbar-note">A prévia e o PDF usam os registros desta sondagem. Gerar o boletim não altera, apaga nem recria os dados.</p>
+        <p class="bulletin-toolbar-note">Intervalo, avanço, recuperação e percentual saem do lançamento. Data, sonda, consumo, checklist e equipe ficam em branco para preencher à mão depois da impressão. Gerar o boletim não altera os intervalos.</p>
       </div>
       <div class="bulletin-scroll">
         <style id="bulletin-page-css"></style>
         <article id="bulletin-sheet" class="bulletin-sheet"></article>
       </div>
     </div>
-    <script src="app.js?v=46"></script>
-    <script src="bulletin.js?v=2"></script>
+    <script src="app.js?v=47"></script>
+    <script src="bulletin.js?v=5"></script>
   </body>
 </html>

@@ -73,7 +73,7 @@ function buildBulletinBox(parent, boxIndex, intervals, ended) {
   layout.boxes = [];
   try {
     const vbW = PAD_L + totalW + PAD_R;
-    const vbH = PAD_T + LABEL_BAND + LENGTH + PAD_B;
+    const vbH = boxViewHeight();
     const svg = el("svg", {
       class: "bulletin-box",
       viewBox: `0 0 ${vbW} ${vbH}`,
@@ -89,6 +89,7 @@ function buildBulletinBox(parent, boxIndex, intervals, ended) {
     const root = el("g");
     svg.appendChild(root);
     drawBox(root, boxIndex, PAD_L);
+    drawBoxDepths(root, intervals, ended);
     const cores = el("g");
     root.appendChild(cores);
     drawCores(cores, intervals, null);
@@ -538,12 +539,276 @@ function renderConclusion(model) {
   return section;
 }
 
-function setBulletinPageMark(model) {
+function setBulletinPageMark() {
   const style = document.getElementById("bulletin-page-css");
   if (!style) return;
-  const name = cssContent(model.name || "Sem nome");
-  const when = cssContent(bulletinWhen(model.generatedAt));
-  style.textContent = `@page bulletin { @top-left { content: "Sondagem ${name}"; font-family: "Segoe UI", sans-serif; font-size: 8pt; color: #5c6b7e; } @top-right { content: "${when}"; font-family: "Segoe UI", sans-serif; font-size: 8pt; color: #5c6b7e; } }`;
+  style.textContent = "@page bulletin { size: A4; margin: 7mm; }";
+}
+
+const SHIFT_ROWS = 14;
+
+const SHIFT_EVENTS = [
+  "Transporte/troca turno",
+  "DDS",
+  "Furando e recuperando",
+  "Manobrando p/ troca de coroa",
+  "Lavando furo e recortando",
+  "Revestindo furo",
+  "Instalação de rede d'água",
+  "Falta de água",
+  "Fazendo perfilagem (desvio)",
+  "Mudança km",
+  "Manutenção preventiva",
+  "Refeição",
+  "Pescando de",
+  "Aguardando",
+];
+
+const SHIFT_CHECKS = [
+  "Limpeza e organização",
+  "Iluminação praça da sonda",
+  "Cabos de aço",
+  "Cabos elétricos",
+  "Água do radiador",
+  "Nível de óleo do motor",
+  "Nível do óleo hidráulico",
+  "Lubrificação de partes móveis",
+  "Temperatura do óleo",
+  "Hidráulico / combustível",
+  "Pressão do sistema (PSI)",
+  "Pressão de avanço (PSI)",
+  "Teste mola rel. de testemunho",
+  "Mangueiras hidráulicas",
+  "Extintor (lacre)",
+  "Ferramentas manuais",
+  "Proteção partes rotativas",
+  "Guarda corpo",
+  "Kit primeiros socorros",
+];
+
+const SHIFT_SUPPLIES = [
+  "Óleo diesel sonda",
+  "Óleo hidráulico",
+  "Óleo 15W40 bomba",
+  "Óleo 50",
+  "Cimento kg",
+  "Aditivos de perfuração",
+  "Graxa revest.",
+  "Graxa hastes",
+  "Viscosificante",
+  "Controle de filtrado",
+  "Redutor de torque",
+];
+
+function plainMeters(value) {
+  return String(value || "").replace(/\s*m$/, "");
+}
+
+function shiftPages(rows, compact) {
+  const pages = [];
+  const source = rows.length ? rows : [null];
+  for (let index = 0; index < source.length; index += SHIFT_ROWS) {
+    pages.push(source.slice(index, index + SHIFT_ROWS));
+  }
+  if (!compact) {
+    return pages.map((page) => {
+      const filled = page.slice();
+      while (filled.length < SHIFT_ROWS) filled.push(null);
+      return filled;
+    });
+  }
+  return pages;
+}
+
+function shiftBlank(text) {
+  const node = tag("span", "shift-blank", text || "");
+  return node;
+}
+
+function renderShiftBulletin(model) {
+  const wrap = tag("div", "shift-bulletin");
+  const rows = model.rows || [];
+  const pages = shiftPages(rows, bulletinState.compact);
+  const lastBox = model.boxCount ? String(model.boxCount) : "";
+  pages.forEach((pageRows, pageIndex) => {
+    const filled = pageRows.filter(Boolean);
+    const advance = filled.reduce((sum, row) => sum + (row.advanceMm || 0), 0);
+    const recovery = filled.reduce((sum, row) => sum + (row.recoveryMm || 0), 0);
+    const page = tag("article", "shift-page");
+
+    const head = tag("header", "shift-head");
+    const brand = tag("div", "shift-brand");
+    brand.append(tag("strong", "", "Pandora"), tag("span", "", "Perfuração e sondagem"));
+    head.append(brand);
+    const title = tag("div", "shift-title");
+    title.append(tag("h1", "", "Boletim de sondagem diamantada"));
+    title.append(tag("p", "", `Folha ${pageIndex + 1} de ${pages.length}`));
+    head.append(title);
+    const client = tag("div", "shift-client");
+    client.append(tag("span", "", "Cliente"), shiftBlank());
+    head.append(client);
+    page.append(head);
+
+    const meta = tag("table", "shift-meta");
+    const metaHead = tag("tr");
+    ["Data", "Turno", "Furo nº", "Localização (alvo)", "Inclin.", "Direção", "Sonda"].forEach((label) => {
+      metaHead.append(tag("th", "", label));
+    });
+    const metaBody = tag("tr");
+    ["", "", model.name || "", "", "", "", ""].forEach((value, index) => {
+      const cell = tag("td", index === 2 ? "is-filled" : "");
+      cell.append(value ? tag("b", "", value) : shiftBlank());
+      metaBody.append(cell);
+    });
+    meta.append(metaHead, metaBody);
+    page.append(meta);
+
+    const body = tag("div", "shift-body");
+    const table = tag("table", "shift-intervals");
+    const group = tag("tr");
+    [
+      ["Intervalo", 2],
+      ["Avanço", 1],
+      ["Recuperação", 2],
+      ["Nº da coroa", 1],
+      ["Nº do calibrador", 1],
+      ["Tipo de material perfurado", 1],
+      ["Tempo de avanço", 1],
+    ].forEach(([label, span], index) => {
+      const cell = tag("th", index > 2 ? "shift-span" : "", label);
+      if (span > 1) cell.colSpan = span;
+      if (index > 2) cell.rowSpan = 2;
+      group.append(cell);
+    });
+    const columns = tag("tr");
+    ["De", "Até", "metro", "metro", "%"].forEach((label) => columns.append(tag("th", "", label)));
+    table.append(group, columns);
+    pageRows.forEach((row) => {
+      const line = tag("tr");
+      const values = row
+        ? [
+            plainMeters(row.from),
+            plainMeters(row.to),
+            plainMeters(row.advance),
+            plainMeters(row.recovery),
+            row.ratio && row.ratio !== "—" ? row.ratio : "",
+            "",
+            "",
+            "",
+            "",
+          ]
+        : ["", "", "", "", "", "", "", "", ""];
+      values.forEach((value) => {
+        line.append(tag("td", value ? "is-filled" : "", value || "\u00a0"));
+      });
+      table.append(line);
+    });
+    body.append(table);
+
+    const side = tag("aside", "shift-side");
+    side.append(tag("p", "shift-side-title", "Revestimentos"));
+    side.append(shiftBlank(), shiftBlank());
+    const last = tag("p", "shift-last-box");
+    last.append(tag("span", "", "Nº última cx."));
+    last.append(tag("b", "", lastBox || "\u00a0"));
+    side.append(last);
+    side.append(tag("p", "shift-side-title", "Consumo de material"));
+    ["Mola", "Caixa de mola", "Mordentes", "Cabo de aço (m)", "Mang. hidráulica"].forEach((label) => {
+      const item = tag("p", "shift-line");
+      item.append(tag("span", "", label), shiftBlank());
+      side.append(item);
+    });
+    [
+      ["AV", plainMeters(formatMeters(advance))],
+      ["RC", plainMeters(formatMeters(recovery))],
+      ["%", formatRatio(advance, recovery)],
+      ["Barre", ""],
+      ["Altura", ""],
+      ["Sobra", ""],
+      ["Haste", ""],
+    ].forEach(([label, value]) => {
+      const item = tag("p", value ? "shift-line is-total" : "shift-line");
+      item.append(tag("span", "", label));
+      item.append(value ? tag("b", "", value) : shiftBlank());
+      side.append(item);
+    });
+    body.append(side);
+    page.append(body);
+
+    const lower = tag("div", "shift-lower");
+    const hours = tag("section", "shift-hours");
+    hours.append(tag("h2", "", "Horímetro"));
+    const hourLine = tag("p", "shift-hour-line");
+    hourLine.append(tag("span", "", "Inicial"), shiftBlank(), tag("span", "", "Final"), shiftBlank());
+    hours.append(hourLine);
+    const drilled = tag("p", "shift-drilled");
+    drilled.append(tag("span", "", "Total sondado"), tag("b", "", plainMeters(formatMeters(advance))));
+    hours.append(drilled);
+    hours.append(tag("h2", "", "Ocorrências"));
+    const events = tag("table", "shift-events");
+    const eventCols = document.createElement("colgroup");
+    ["56%", "14%", "14%", "16%"].forEach((width) => {
+      const col = document.createElement("col");
+      col.style.width = width;
+      eventCols.append(col);
+    });
+    events.append(eventCols);
+    const eventHead = tag("tr");
+    ["", "De", "Até", "Horas"].forEach((label) => eventHead.append(tag("th", "", label)));
+    events.append(eventHead);
+    SHIFT_EVENTS.forEach((label) => {
+      const line = tag("tr");
+      line.append(tag("td", "", label), tag("td", ""), tag("td", ""), tag("td", ""));
+      events.append(line);
+    });
+    hours.append(events);
+    lower.append(hours);
+
+    const checks = tag("section", "shift-checks");
+    checks.append(tag("h2", "", "Check list de sonda"));
+    const checkHead = tag("p", "shift-check-head");
+    checkHead.append(tag("span", "", "Conforme"), tag("span", "", "Não"));
+    checks.append(checkHead);
+    SHIFT_CHECKS.forEach((label) => {
+      const line = tag("p", "shift-check");
+      line.append(tag("span", "shift-tick"), tag("span", "shift-tick"), tag("span", "", label));
+      checks.append(line);
+    });
+    lower.append(checks);
+
+    const supplies = tag("section", "shift-supplies");
+    supplies.append(tag("h2", "", "Horário"));
+    const timeLine = tag("p", "shift-hour-line");
+    timeLine.append(tag("span", "", "Inicial"), shiftBlank(), tag("span", "", "Final"), shiftBlank());
+    supplies.append(timeLine);
+    supplies.append(tag("h2", "", "Consumo de material"));
+    SHIFT_SUPPLIES.forEach((label) => {
+      const line = tag("p", "shift-line");
+      line.append(tag("span", "", label), shiftBlank());
+      supplies.append(line);
+    });
+    lower.append(supplies);
+    page.append(lower);
+
+    const crew = tag("footer", "shift-crew");
+    [
+      ["Sondador", ""],
+      ["Auxiliares", ""],
+      ["Ass. sondagem", ""],
+      ["Ass. cliente", ""],
+    ].forEach(([label]) => {
+      const field = tag("p", "");
+      field.append(tag("span", "", label), shiftBlank());
+      crew.append(field);
+    });
+    page.append(crew);
+    const notes = tag("section", "shift-notes");
+    notes.append(tag("h2", "", "Observação"));
+    notes.append(shiftBlank(), shiftBlank(), shiftBlank());
+    page.append(notes);
+    wrap.append(page);
+  });
+  return wrap;
 }
 
 function renderBulletinSheet() {
@@ -551,25 +816,12 @@ function renderBulletinSheet() {
   const model = bulletinState.model;
   if (!sheet || !model) return;
   sheet.replaceChildren();
-  const on = bulletinState.on;
-  if (on.has("cover")) sheet.append(renderCover(model));
-  if (on.has("summary")) sheet.append(renderSummary(model));
-  if (on.has("table")) sheet.append(renderTable(model));
-  if (on.has("method")) sheet.append(renderMethod(model));
-  if (on.has("boxes")) renderBoxes(model, sheet);
-  if (on.has("charts")) sheet.append(renderCharts(model));
-  if (on.has("geology")) sheet.append(renderGeology(model));
-  if (on.has("photos")) sheet.append(renderPhotos(model));
-  if (on.has("quality")) sheet.append(renderQuality(model));
-  if (on.has("conclusion")) sheet.append(renderConclusion(model));
+  sheet.append(renderShiftBulletin(model));
 }
 
 function markBulletinPreset() {
-  const ids = BULLETIN_SECTIONS.map(([id]) => id);
-  const all = ids.every((id) => bulletinState.on.has(id));
-  const short = BULLETIN_SHORT.length === bulletinState.on.size && BULLETIN_SHORT.every((id) => bulletinState.on.has(id));
-  document.getElementById("bulletin-full")?.classList.toggle("is-on", all);
-  document.getElementById("bulletin-short")?.classList.toggle("is-on", short);
+  document.getElementById("bulletin-full")?.classList.toggle("is-on", !bulletinState.compact);
+  document.getElementById("bulletin-short")?.classList.toggle("is-on", Boolean(bulletinState.compact));
 }
 
 function syncBulletinChecks() {
@@ -642,6 +894,7 @@ async function openBulletin() {
   const snapshot = taquinhos.map((item) => ({ ...item, geo: item.geo ? { ...item.geo } : undefined }));
   const model = buildBulletinModel(snapshot, { name: hole.name, ended: hole.ended }, new Date());
   bulletinState.model = model;
+  bulletinState.compact = false;
   bulletinState.on = new Set(BULLETIN_SECTIONS.map(([id]) => id));
   try {
     bulletinState.photos = await loadBulletinPhotos(model.placed);
@@ -660,7 +913,7 @@ async function openBulletin() {
   if (!root) return;
   root.hidden = false;
   document.body.classList.add("has-bulletin");
-  setBulletinPageMark(model);
+  setBulletinPageMark();
   syncBulletinChecks();
   renderBulletinSheet();
   document.getElementById("bulletin-close")?.focus();
@@ -685,9 +938,11 @@ document.getElementById("bulletin-close")?.addEventListener("click", closeBullet
 document.getElementById("bulletin-print")?.addEventListener("click", printBulletin);
 document.getElementById("bulletin-pdf")?.addEventListener("click", printBulletin);
 document.getElementById("bulletin-full")?.addEventListener("click", () => {
+  bulletinState.compact = false;
   applyBulletinPreset(BULLETIN_SECTIONS.map(([id]) => id));
 });
 document.getElementById("bulletin-short")?.addEventListener("click", () => {
+  bulletinState.compact = true;
   applyBulletinPreset(BULLETIN_SHORT);
 });
 document.addEventListener("keydown", (event) => {

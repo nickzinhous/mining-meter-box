@@ -41,6 +41,7 @@ const PAD_L = 3.6;
 const PAD_R = 3.8;
 const PAD_T = 0.35;
 const PAD_B = 1.4;
+const BOX_DEPTH_BAND = 2.4;
 
 const BOX_GAP = 8;
 
@@ -268,6 +269,78 @@ function estimateDepthUm(interval, offsetMm) {
   if (!interval || interval.recuperacaoMm <= 0 || offsetMm < 0) return null;
   const capped = Math.min(offsetMm, interval.recuperacaoMm);
   return depthUmFromTape(interval, Math.round(capped * 1000));
+}
+
+/** Profundidade geológica, em micrômetros, num ponto do testemunho recuperado. */
+function depthUmAtPhysical(intervals, physicalMm) {
+  const point = Math.max(0, physicalMm);
+  let before = null;
+  let after = null;
+  for (const interval of intervals) {
+    if (!interval || interval.recuperacaoMm <= 0) continue;
+    if (point >= interval.physicalInicialMm && point <= interval.physicalFinalMm) {
+      const um = estimateDepthUm(interval, point - interval.physicalInicialMm);
+      if (um != null) return um;
+    }
+    if (interval.physicalFinalMm <= point) before = interval;
+    else if (!after) after = interval;
+  }
+  if (before) {
+    const um = estimateDepthUm(before, before.recuperacaoMm);
+    if (um != null) return um;
+  }
+  if (after) {
+    const um = estimateDepthUm(after, 0);
+    if (um != null) return um;
+  }
+  if (!intervals.length) return 0;
+  if (point <= 0) return intervals[0].profundidadeInicialMm * 1000;
+  return intervals[intervals.length - 1].profundidadeFinalMm * 1000;
+}
+
+/**
+ * Um valor por emenda de caixa. A posição i+1 é o fim da caixa i e o início da seguinte.
+ * A conta da profundidade é estimateDepthUm; aqui só se escolhe o ponto físico.
+ */
+function boxDepthEdges(intervals, ended) {
+  const span = CHANNELS * LENGTH * MM;
+  let materialEnd = 0;
+  let anyCore = false;
+  for (const interval of intervals) {
+    if (interval.recuperacaoMm > 0) {
+      anyCore = true;
+      materialEnd = Math.max(materialEnd, interval.physicalFinalMm);
+    }
+  }
+  const count = Math.max(boxesFor(intervals, Boolean(ended)), intervals.length ? 1 : 0);
+  const edges = [];
+  for (let i = 0; i <= count; i++) {
+    if (!anyCore) {
+      const start = intervals[0] ? intervals[0].profundidadeInicialMm * 1000 : 0;
+      const end = intervals.length ? intervals[intervals.length - 1].profundidadeFinalMm * 1000 : 0;
+      edges.push(i === 0 ? start : end);
+      continue;
+    }
+    const physical = i === 0 ? 0 : Math.min(i * span, materialEnd);
+    edges.push(depthUmAtPhysical(intervals, physical));
+  }
+  return edges;
+}
+
+/** Exibição da profundidade da caixa: múltiplo de 5 cm mais próximo, duas casas, vírgula. */
+function formatBoxDepth(um) {
+  if (um == null || !Number.isFinite(um)) return "";
+  const cm = Math.round(um / 10000);
+  const roundedCm = Math.round(cm / 5) * 5;
+  const negative = roundedCm < 0;
+  const abs = Math.abs(roundedCm);
+  const whole = Math.floor(abs / 100);
+  const frac = String(abs % 100).padStart(2, "0");
+  return `${negative ? "-" : ""}${whole},${frac} m`;
+}
+
+function boxViewHeight() {
+  return PAD_T + LABEL_BAND + LENGTH + BOX_DEPTH_BAND + PAD_B;
 }
 
 /** Metro inteiro da profundidade, no ponto físico em que ele cai na caixa. */
@@ -611,7 +684,7 @@ function drawBox(parent, boxIndex, originX) {
   const y0 = PAD_T + LABEL_BAND;
   const channelX = [];
   const shell = el("g", { class: "tray-top" });
-  const bodyH = LENGTH + LABEL_BAND;
+  const bodyH = LENGTH + LABEL_BAND + BOX_DEPTH_BAND;
 
   shell.appendChild(
     el("rect", {
@@ -800,6 +873,7 @@ function buildTopView() {
     for (let i = 0; i < count; i++) drawBox(root, i);
   }
 
+  drawBoxDepths(root, currentIntervals(), Boolean(currentHole()?.ended));
   drawMeterMarks(root, currentIntervals());
   applyCamera();
 }
@@ -856,6 +930,49 @@ function drawMeterMarks(parent, intervals) {
     group.appendChild(chip);
   }
   parent.appendChild(group);
+}
+
+function drawBoxDepths(parent, intervals, ended) {
+  if (!parent || !intervals?.length) return;
+  const edges = boxDepthEdges(intervals, ended);
+  const group = el("g", { class: "box-depths", "pointer-events": "none" });
+  for (let index = 0; index < edges.length - 1; index++) {
+    const box = layout.boxes[index];
+    if (!box) continue;
+    const start = formatBoxDepth(edges[index]);
+    const end = formatBoxDepth(edges[index + 1]);
+    if (start) {
+      const bottom = el("text", {
+        class: "box-depth box-depth-start",
+        x: box.ox + 0.5,
+        y: box.y0 + LENGTH + BOX_DEPTH_BAND / 2,
+        "text-anchor": "start",
+        "dominant-baseline": "middle",
+        fill: "var(--box-ink)",
+        "font-size": 0.9,
+        "font-weight": "650",
+        "font-family": "Inter, Segoe UI, system-ui, sans-serif",
+      });
+      bottom.textContent = start;
+      group.appendChild(bottom);
+    }
+    if (end) {
+      const top = el("text", {
+        class: "box-depth box-depth-end",
+        x: box.ox + totalW - 0.5,
+        y: PAD_T + 1.52,
+        "text-anchor": "end",
+        "dominant-baseline": "middle",
+        fill: "var(--box-ink)",
+        "font-size": 0.9,
+        "font-weight": "650",
+        "font-family": "Inter, Segoe UI, system-ui, sans-serif",
+      });
+      top.textContent = end;
+      group.appendChild(top);
+    }
+  }
+  if (group.childNodes.length) parent.appendChild(group);
 }
 
 function drawCores(root, intervals, pickedId = selectedId) {
@@ -1601,7 +1718,7 @@ function fullSize() {
   const n = soloBox ? 1 : boxCount();
   return {
     w: PAD_L + n * totalW + Math.max(0, n - 1) * BOX_GAP + PAD_R,
-    h: PAD_T + LABEL_BAND + LENGTH + PAD_B,
+    h: boxViewHeight(),
   };
 }
 
@@ -4453,25 +4570,17 @@ const BULLETIN_CHECKS = [
 ];
 
 const BULLETIN_SECTIONS = [
-  ["cover", "Capa"],
-  ["summary", "Resumo"],
-  ["table", "Avanços e recuperações"],
-  ["method", "Memória de cálculo"],
-  ["boxes", "Caixas"],
-  ["charts", "Gráficos"],
-  ["geology", "Descrição"],
-  ["photos", "Fotografias"],
-  ["quality", "Pendências"],
-  ["conclusion", "Conclusão"],
+  ["form", "Boletim de campo"],
 ];
 
-const BULLETIN_SHORT = ["cover", "summary", "table", "quality", "conclusion"];
+const BULLETIN_SHORT = ["form"];
 
 const bulletinState = {
   model: null,
   photos: [],
   on: new Set(),
   photoError: false,
+  compact: false,
 };
 
 function nText(count, one, many) {
@@ -4693,6 +4802,9 @@ if (typeof module !== "undefined" && module.exports) {
     tapeUmFromDepth,
     depthUmFromTape,
     estimateDepthUm,
+    depthUmAtPhysical,
+    boxDepthEdges,
+    formatBoxDepth,
     formatMetersUm,
     formatCmUm,
     depthSpan,
@@ -4700,6 +4812,7 @@ if (typeof module !== "undefined" && module.exports) {
     auditIntervals,
     fimMarker,
     meterMarkPositions,
+    recoveryExceedsAdvance,
     normalizeGeo,
     geoIsEmpty,
     buildBulletinModel,
