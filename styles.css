@@ -2363,6 +2363,55 @@ body.tray-wide {
   white-space: nowrap;
 }
 
+.taquinho-face .taquinho-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  max-width: 96%;
+  padding: 0 1px;
+  color: var(--taquinho-ink);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.taquinho-face .taquinho-label.is-drag {
+  cursor: grabbing;
+  z-index: 2;
+}
+
+.card-cuts {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.cut-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.cut-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.field--inline {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem;
+  align-items: center;
+}
+
 .taquinho-face.is-picked,
 .taquinho.is-picked {
   filter: brightness(1.08);

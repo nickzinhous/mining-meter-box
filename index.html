@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=66" />
+    <link rel="stylesheet" href="styles.css?v=68" />
     <style>
       .login-screen {
         position: fixed;
@@ -114,6 +114,8 @@
                   <button type="button" id="undo-log" class="btn-quiet" disabled>Desfazer</button>
                   <button type="button" id="copy-report" class="btn-quiet" disabled>Copiar resumo</button>
                   <button type="button" id="fim-toggle" class="btn-quiet" aria-pressed="false">Fim de furo</button>
+                  <button type="button" id="manual-taquinho-open" class="btn-quiet">Adicionar taquinho manual</button>
+                  <button type="button" id="taquinho-label-open" class="btn-quiet">Texto no taquinho</button>
                 </div>
                 <div class="menu-group">
                   <p class="menu-label">Arquivo</p>
@@ -574,6 +576,60 @@
         </div>
       </form>
     </dialog>
+    <dialog id="manual-taquinho-dialog" class="sheet">
+      <form id="manual-taquinho-form" method="dialog" class="sheet-card">
+        <h2 id="manual-taquinho-title">Taquinho manual</h2>
+        <p class="field-hint">Canaleta e posição no friso (cm ímpares de 1 a 97). Não altera os taquinhos automáticos.</p>
+        <label class="field">
+          <span>Caixa</span>
+          <input name="box" type="number" min="1" step="1" value="1" required />
+        </label>
+        <label class="field">
+          <span>Canaleta</span>
+          <select name="channel" required>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Início do friso (cm)</span>
+          <input name="localStartCm" type="number" min="1" max="97" step="2" value="1" required />
+        </label>
+        <div class="sheet-actions">
+          <button type="button" id="manual-taquinho-delete" class="btn-quiet is-danger" hidden>Excluir</button>
+          <button value="cancel" class="btn-quiet">Cancelar</button>
+          <button value="ok" class="btn">Salvar</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="taquinho-label-dialog" class="sheet">
+      <form id="taquinho-label-form" method="dialog" class="sheet-card">
+        <h2 id="taquinho-label-title">Texto no taquinho</h2>
+        <p class="field-hint">Selecione um taquinho na caixa antes de abrir. Posição em % dentro do bloco; arraste o texto na face para ajustar.</p>
+        <label class="field field--full">
+          <span>Conteúdo</span>
+          <input name="text" type="text" maxlength="40" required />
+        </label>
+        <label class="field">
+          <span>Fonte (px)</span>
+          <input name="fontPx" type="number" min="6" max="28" step="1" value="10" required />
+        </label>
+        <label class="field">
+          <span>Horizontal (%)</span>
+          <input name="xPct" type="number" min="0" max="100" step="1" value="50" required />
+        </label>
+        <label class="field">
+          <span>Vertical (%)</span>
+          <input name="yPct" type="number" min="0" max="100" step="1" value="50" required />
+        </label>
+        <div class="sheet-actions">
+          <button type="button" id="taquinho-label-delete" class="btn-quiet is-danger" hidden>Excluir texto</button>
+          <button value="cancel" class="btn-quiet">Cancelar</button>
+          <button value="ok" class="btn">Salvar</button>
+        </div>
+      </form>
+    </dialog>
     <article id="print-sheet" class="print-sheet"></article>
     <div id="bulletin-root" class="bulletin-root" hidden>
       <div class="bulletin-toolbar">
@@ -597,7 +653,7 @@
         <article id="bulletin-sheet" class="bulletin-sheet"></article>
       </div>
     </div>
-    <script src="app.js?v=50"></script>
+    <script src="app.js?v=53"></script>
     <script src="bulletin.js?v=5"></script>
   </body>
 </html>
