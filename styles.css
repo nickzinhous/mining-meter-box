@@ -2246,6 +2246,19 @@ html.resume-work body.is-home #home-open {
   pointer-events: none;
 }
 
+.meter-marks .meter-mark {
+  opacity: 0.9;
+}
+
+.meter-marks .meter-tick {
+  opacity: 0.95;
+}
+
+.meter-marks .meter-label {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.88;
+}
+
 .tray-svg.meters-off .meter-marks {
   display: none;
 }

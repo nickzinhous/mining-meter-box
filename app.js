@@ -1030,7 +1030,7 @@ function buildTopView() {
 function drawMeterMarks(parent, intervals) {
   const marks = meterMarkPositions(intervals);
   if (!marks.length) return;
-  const group = el("g", { class: "meter-marks" });
+  const group = el("g", { class: "meter-marks", "pointer-events": "none" });
   const placed = [];
   for (const mark of marks) {
     const box = layout.boxes[mark.box];
@@ -1039,21 +1039,17 @@ function drawMeterMarks(parent, intervals) {
     if (x == null) continue;
     const y = yFromBase(box.y0, mark.localCm);
     const digits = String(mark.meter).length;
-    const tickLen = 1.65;
-    const gap = 0.52;
-    const fontSize = digits >= 3 ? 0.44 : digits === 2 ? 0.54 : 0.66;
+    // Marcação de leitura: número à esquerda + traço fino apontando a parede.
+    const tickLen = 1.05;
+    const labelGap = 0.2;
+    const fontSize = digits >= 3 ? 0.46 : digits === 2 ? 0.54 : 0.6;
     const key = `${mark.box}:${mark.channel}:${Math.round(y * 20)}`;
     let shift = 0;
     while (placed.some((item) => item.key === key && item.shift === shift)) shift += 1;
     placed.push({ key, shift });
-    // Risco físico: barra horizontal no vão, encostada na parede esquerda da canaleta.
-    const x2 = x - shift * 0.35;
+    const x2 = x - 0.04 - shift * 0.42;
     const x1 = x2 - tickLen;
-    const midX = (x1 + x2) / 2;
-    const nearTop = mark.localCm >= 96;
-    const nearBottom = mark.localCm <= 4;
-    const labelY = nearTop ? y - gap : y + gap;
-    const chip = el("g", { opacity: 0.97 });
+    const chip = el("g", { class: "meter-mark" });
     const title = el("title");
     title.textContent = `${mark.meter} m`;
     chip.appendChild(title);
@@ -1064,45 +1060,25 @@ function drawMeterMarks(parent, intervals) {
         y1: y,
         x2,
         y2: y,
-        stroke: "var(--box-ink)",
-        "stroke-width": 2,
-        "stroke-linecap": "butt",
-        "vector-effect": "non-scaling-stroke",
-      }),
-    );
-    // Cabeça na parede: marca o ponto exato do metro sem entrar no testemunho.
-    chip.appendChild(
-      el("line", {
-        class: "meter-head",
-        x1: x2,
-        y1: y - 0.22,
-        x2: x2,
-        y2: y + 0.22,
-        stroke: "var(--box-ink)",
-        "stroke-width": 1.7,
+        stroke: "var(--tick)",
+        "stroke-width": 1.35,
         "stroke-linecap": "butt",
         "vector-effect": "non-scaling-stroke",
       }),
     );
     const label = el("text", {
       class: "meter-label",
-      x: midX,
-      y: labelY,
-      "text-anchor": "middle",
-      "dominant-baseline": nearTop ? "auto" : "hanging",
+      x: x1 - labelGap,
+      y,
+      "text-anchor": "end",
+      "dominant-baseline": "central",
       fill: "var(--box-ink)",
       "font-size": fontSize,
-      "font-weight": "700",
+      "font-weight": "600",
       "font-family": "Inter, Segoe UI, system-ui, sans-serif",
-      "letter-spacing": digits > 1 ? "-0.03em" : "0",
     });
     label.textContent = String(mark.meter);
     chip.appendChild(label);
-    // No fundo da canaleta evita o número cair na faixa de profundidade.
-    if (nearBottom && !nearTop) {
-      label.setAttribute("y", String(y - gap * 0.85));
-      label.setAttribute("dominant-baseline", "auto");
-    }
     group.appendChild(chip);
   }
   parent.appendChild(group);
