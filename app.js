@@ -38,9 +38,6 @@ const DEFAULT_MATERIAL = MATERIAL_COLORS[7];
 let taquinhos = [];
 /** @type {null | { depthUm: number, tapeUm: number, physicalUm: number, intervalIndex: number }} */
 let consulta = null;
-/** Edição de taquinho manual / texto associado (ids estáveis). */
-let editingManualId = null;
-let editingLabelId = null;
 
 const PAD_L = 3.6;
 const PAD_R = 3.8;
@@ -126,7 +123,7 @@ function meterSlices(intervals) {
       const slice = stop - start;
       if (slice <= 0 || interval.avancoMm <= 0) continue;
       advance += slice;
-      recovery += (slice / interval.avancoMm) * roundedRecoveryMm(interval.recuperacaoMm);
+      recovery += (slice / interval.avancoMm) * interval.recuperacaoMm;
       if (slice > bestSlice) {
         bestSlice = slice;
         bestId = interval.id;
@@ -176,7 +173,7 @@ function auditIntervals(intervals) {
   const spans = [];
   for (const item of intervals) {
     if (item.recuperacaoMm <= 0) continue;
-    for (const seg of intervalMaterialSegments(item)) {
+    for (const seg of recoverySegments(item.physicalInicialMm, item.physicalFinalMm)) {
       const origin = seg.channelIndex * LENGTH * MM;
       spans.push({
         id: item.id,
@@ -283,14 +280,8 @@ function depthUmAtPhysical(intervals, physicalMm) {
   let after = null;
   for (const interval of intervals) {
     if (!interval || interval.recuperacaoMm <= 0) continue;
-    const segs = intervalMaterialSegments(interval);
-    const hit = segs.some((seg) => {
-      const absStart = seg.channelIndex * LENGTH * MM + seg.localStartMm;
-      const absEnd = seg.channelIndex * LENGTH * MM + seg.localEndMm;
-      return point >= absStart && point <= absEnd;
-    });
-    if (hit) {
-      const um = estimateDepthUm(interval, recoveryOffsetFromPhysical(interval, point));
+    if (point >= interval.physicalInicialMm && point <= interval.physicalFinalMm) {
+      const um = estimateDepthUm(interval, point - interval.physicalInicialMm);
       if (um != null) return um;
     }
     if (interval.physicalFinalMm <= point) before = interval;
@@ -369,7 +360,7 @@ function meterMarkPositions(intervals) {
     if (interval.recuperacaoMm > 0) {
       const tapeUm = tapeUmFromDepth(interval, depthMm);
       if (tapeUm == null) continue;
-      physicalMm = physicalMmFromRecoveryOffset(interval, tapeUm / 1000);
+      physicalMm = interval.physicalInicialMm + tapeUm / 1000;
     }
     const lengthMm = LENGTH * MM;
     let channelIndex = Math.floor(Math.max(0, physicalMm) / lengthMm);
@@ -441,15 +432,6 @@ function formatTaquinhoSpan(startMm, endMm) {
   return `${formatTaquinhoMeters(startMm).replace(/ m$/, "")}–${formatTaquinhoMeters(endMm)}`;
 }
 
-/** Recuperação arredondada para exibição e cálculos. A geometria continua com o valor real. */
-function roundedRecoveryMm(mm) {
-  return roundCoreMm(mm);
-}
-
-function sumRoundedRecoveryMm(intervals) {
-  return intervals.reduce((sum, item) => sum + roundedRecoveryMm(item.recuperacaoMm), 0);
-}
-
 /** Primeiro encaixe de taquinho que termina depois de `mm`. */
 function markerFrom(mm) {
   let slot = placement(mm);
@@ -458,12 +440,10 @@ function markerFrom(mm) {
 }
 
 /**
- * Recuperação zero não deposita testemunho.
- * Sem taquinho anterior, usa o 1º friso disponível.
- * Com taquinho anterior, pula um friso para não encostar no vizinho.
+ * Recuperação zero não deposita testemunho, mas o taquinho da manobra
+ * não pode encostar no anterior: pula um friso e marca o encaixe seguinte.
  */
 function placeZeroRecovery(afterMarkerEndMm) {
-  if (!(afterMarkerEndMm > 0)) return markerFrom(0);
   const skipped = markerFrom(afterMarkerEndMm);
   return markerFrom(skipped.topEnd * MM);
 }
@@ -488,10 +468,7 @@ function accumulateIntervals(items) {
       physicalFinalMm: occupiedMm,
     };
     if (item.recuperacaoMm > 0) {
-      const cortes = normalizeCortes(item.cortes, item.recuperacaoMm);
-      placed.cortes = cortes;
-      const dist = distributeRecovery(occupiedMm, item.recuperacaoMm, cortes);
-      const materialEnd = dist.finalMm;
+      const materialEnd = occupiedMm + item.recuperacaoMm;
       const block = placement(materialEnd);
       placed.physicalInicialMm = occupiedMm;
       placed.physicalFinalMm = materialEnd;
@@ -499,8 +476,7 @@ function accumulateIntervals(items) {
       lastMarkerEndMm = block.topEnd * MM;
     } else {
       const marker = placeZeroRecovery(lastMarkerEndMm);
-      // Âncora dentro do friso (não na borda) para a margem inicial não deslocar o marcador.
-      const point = marker.topStart * MM + 1;
+      const point = marker.topStart * MM;
       placed.physicalInicialMm = point;
       placed.physicalFinalMm = point;
       lastMarkerEndMm = marker.topEnd * MM;
@@ -547,93 +523,6 @@ function recoverySegments(startMm, endMm) {
   return segments;
 }
 
-/** Cortes: offsets em mm desde o início da recuperação real, antes dos saltos. */
-function normalizeCortes(cortes, recoveryMm) {
-  if (!Array.isArray(cortes) || !(recoveryMm > 0)) return [];
-  const seen = new Set();
-  const out = [];
-  for (const item of cortes) {
-    if (!item || typeof item !== "object") continue;
-    const offsetMm = Math.round(Number(item.offsetMm));
-    if (!Number.isSafeInteger(offsetMm) || offsetMm <= 0 || offsetMm >= recoveryMm) continue;
-    if (seen.has(offsetMm)) continue;
-    seen.add(offsetMm);
-    out.push({
-      id: typeof item.id === "string" && item.id ? item.id : crypto.randomUUID(),
-      offsetMm,
-    });
-  }
-  out.sort((a, b) => a.offsetMm - b.offsetMm);
-  return out;
-}
-
-/**
- * Distribui a recuperação com cortes: cada corte termina o trecho atual e
- * o restante recomeça no início da canaleta seguinte. O comprimento total
- * recuperado permanece igual; só a distribuição gráfica muda.
- */
-function distributeRecovery(startMm, recoveryMm, cortes) {
-  const lengthMm = LENGTH * MM;
-  const cuts = normalizeCortes(cortes, recoveryMm).map((item) => item.offsetMm);
-  const bounds = [0, ...cuts, recoveryMm];
-  const segments = [];
-  let cursor = startMm;
-  for (let i = 0; i < bounds.length - 1; i += 1) {
-    const pieceMm = bounds[i + 1] - bounds[i];
-    if (pieceMm <= 0) continue;
-    for (const seg of recoverySegments(cursor, cursor + pieceMm)) segments.push(seg);
-    cursor += pieceMm;
-    if (i < bounds.length - 2) {
-      const into = ((cursor % lengthMm) + lengthMm) % lengthMm;
-      if (into !== 0) cursor += lengthMm - into;
-    }
-  }
-  return { segments, finalMm: cursor, startMm };
-}
-
-function intervalMaterialSegments(interval) {
-  if (!interval || !(interval.recuperacaoMm > 0)) return [];
-  return distributeRecovery(
-    interval.physicalInicialMm,
-    interval.recuperacaoMm,
-    interval.cortes,
-  ).segments;
-}
-
-function physicalMmFromRecoveryOffset(interval, offsetMm) {
-  if (!interval || !(interval.recuperacaoMm > 0)) return interval?.physicalInicialMm ?? 0;
-  const target = Math.min(Math.max(0, offsetMm), interval.recuperacaoMm);
-  let left = target;
-  for (const seg of intervalMaterialSegments(interval)) {
-    if (left <= seg.lengthMm) {
-      return seg.channelIndex * LENGTH * MM + seg.localStartMm + left;
-    }
-    left -= seg.lengthMm;
-  }
-  return distributeRecovery(interval.physicalInicialMm, interval.recuperacaoMm, interval.cortes).finalMm;
-}
-
-function recoveryOffsetFromPhysical(interval, physicalMm) {
-  if (!interval || !(interval.recuperacaoMm > 0)) return 0;
-  let offset = 0;
-  for (const seg of intervalMaterialSegments(interval)) {
-    const absStart = seg.channelIndex * LENGTH * MM + seg.localStartMm;
-    const absEnd = seg.channelIndex * LENGTH * MM + seg.localEndMm;
-    if (physicalMm < absStart) return offset;
-    if (physicalMm <= absEnd) return offset + (physicalMm - absStart);
-    offset += seg.lengthMm;
-  }
-  return interval.recuperacaoMm;
-}
-
-/** Margem de 1 cm no início da canaleta (cm 0–1). Compara em centímetros inteiros. */
-function inChannelStartMargin(mm) {
-  const lengthMm = LENGTH * MM;
-  const into = ((mm % lengthMm) + lengthMm) % lengthMm;
-  if (into === 0) return false;
-  return Math.ceil(into / MM) === cmFromMeters(ESPACO_MINIMO_CAIXA);
-}
-
 function placement(depthMm) {
   const lengthMm = LENGTH * MM;
   const topMm = TOP_LEN * MM;
@@ -644,10 +533,6 @@ function placement(depthMm) {
     for (let local = 1; local <= 97; local += 2) {
       const start = origin + local * MM;
       const end = start + topMm;
-      // Material na margem inicial: o 1º friso fica indisponível; usa o 2º (cm 3–5).
-      if (local === 1 && inChannelStartMargin(depthMm) && Math.floor(depthMm / lengthMm) === channelIndex) {
-        continue;
-      }
       const beforeSlot = depthMm < start;
       const insideSlot = depthMm >= start && depthMm < end;
       if (beforeSlot || insideSlot) {
@@ -684,10 +569,6 @@ function boxesFor(intervals, ended) {
     if (!block) continue;
     any = true;
     maxBox = Math.max(maxBox, block.box);
-  }
-  for (const marker of currentManualTaquinhos()) {
-    any = true;
-    maxBox = Math.max(maxBox, marker.box);
   }
   const fim = fimMarker(intervals, ended);
   if (fim) {
@@ -1023,8 +904,14 @@ function buildTopView() {
   }
 
   drawBoxDepths(root, currentIntervals(), Boolean(currentHole()?.ended));
-  drawMeterMarks(root, currentIntervals());
   applyCamera();
+}
+
+function renderMeterMarks(intervals = currentIntervals()) {
+  const root = document.getElementById("meters-root");
+  if (!root) return;
+  root.replaceChildren();
+  drawMeterMarks(root, intervals);
 }
 
 function drawMeterMarks(parent, intervals) {
@@ -1039,42 +926,77 @@ function drawMeterMarks(parent, intervals) {
     if (x == null) continue;
     const y = yFromBase(box.y0, mark.localCm);
     const digits = String(mark.meter).length;
-    // Marcação de leitura: número à esquerda + traço fino apontando a parede.
-    const tickLen = 1.05;
-    const labelGap = 0.2;
-    const fontSize = digits >= 3 ? 0.46 : digits === 2 ? 0.54 : 0.6;
     const key = `${mark.box}:${mark.channel}:${Math.round(y * 20)}`;
     let shift = 0;
     while (placed.some((item) => item.key === key && item.shift === shift)) shift += 1;
     placed.push({ key, shift });
-    const x2 = x - 0.04 - shift * 0.42;
-    const x1 = x2 - tickLen;
+
+    // Risco horizontal atravessando a canaleta; placa compacta no vão central.
+    const inset = 0.08;
+    const x1 = x + inset;
+    const x2 = x + xu(CHANNEL_W) - inset;
+    const mid = (x1 + x2) / 2;
+    const plateW = Math.min(xu(CHANNEL_W) - 0.55, (digits >= 3 ? 2.4 : digits === 2 ? 1.95 : 1.55) + shift * 0.2);
+    const plateH = 1.55;
+    const gap = plateW + 0.28;
+    const fontSize = digits >= 3 ? 0.85 : digits === 2 ? 1.05 : 1.2;
     const chip = el("g", { class: "meter-mark" });
     const title = el("title");
     title.textContent = `${mark.meter} m`;
     chip.appendChild(title);
+
+    const strokePair = (xA, xB) => {
+      if (xB - xA < 0.2) return;
+      chip.appendChild(
+        el("line", {
+          class: "meter-tick meter-tick-shadow",
+          x1: xA,
+          y1: y,
+          x2: xB,
+          y2: y,
+          stroke: "#0b1220",
+          "stroke-width": 3.2,
+          "stroke-linecap": "butt",
+          opacity: 0.5,
+          "vector-effect": "non-scaling-stroke",
+        }),
+      );
+      chip.appendChild(
+        el("line", {
+          class: "meter-tick",
+          x1: xA,
+          y1: y,
+          x2: xB,
+          y2: y,
+          stroke: "var(--tick)",
+          "stroke-width": 1.7,
+          "stroke-linecap": "butt",
+          "vector-effect": "non-scaling-stroke",
+        }),
+      );
+    };
+    strokePair(x1, mid - gap / 2);
+    strokePair(mid + gap / 2, x2);
+
     chip.appendChild(
-      el("line", {
-        class: "meter-tick",
-        x1,
-        y1: y,
-        x2,
-        y2: y,
-        stroke: "var(--tick)",
-        "stroke-width": 1.35,
-        "stroke-linecap": "butt",
-        "vector-effect": "non-scaling-stroke",
+      el("rect", {
+        class: "meter-plate",
+        x: mid - plateW / 2,
+        y: y - plateH / 2,
+        width: plateW,
+        height: plateH,
+        rx: 0.22,
       }),
     );
     const label = el("text", {
       class: "meter-label",
-      x: x1 - labelGap,
-      y,
-      "text-anchor": "end",
+      x: mid,
+      y: y + 0.04,
+      "text-anchor": "middle",
       "dominant-baseline": "central",
-      fill: "var(--box-ink)",
+      fill: "#0b1220",
       "font-size": fontSize,
-      "font-weight": "600",
+      "font-weight": "800",
       "font-family": "Inter, Segoe UI, system-ui, sans-serif",
     });
     label.textContent = String(mark.meter);
@@ -1091,7 +1013,7 @@ function drawBoxDepths(parent, intervals, ended) {
   for (let index = 0; index < edges.length - 1; index++) {
     const box = layout.boxes[index];
     if (!box) continue;
-    const depthLabel = (um) => formatBoxDepth(um);
+    const depthLabel = (um) => (um == null || !Number.isFinite(um) ? "" : formatMeters(Math.round(um / 1000)));
     const start = depthLabel(edges[index]);
     const end = depthLabel(edges[index + 1]);
     if (start) {
@@ -1132,7 +1054,7 @@ function drawCores(root, intervals, pickedId = selectedId) {
   intervals.forEach((interval) => {
     if (interval.recuperacaoMm <= 0) return;
     const fill = normalizeHex(interval.color);
-    for (const seg of intervalMaterialSegments(interval)) {
+    for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
       const box = layout.boxes[seg.box];
       if (!box) continue;
       const x = box.channelX[seg.channel];
@@ -1256,18 +1178,6 @@ function drawTaquinhos(root, intervals, ended, pickedId = selectedId) {
   if (fim) {
     appendTaquinho(root, fim, "fim", ["FIM"], "Fim de furo", false);
   }
-
-  for (const marker of currentManualTaquinhos()) {
-    const place = placeFromManual(marker);
-    appendTaquinho(
-      root,
-      place,
-      marker.id,
-      ["MANUAL"],
-      `Taquinho manual · caixa ${marker.box + 1} · canaleta ${marker.channel + 1}`,
-      marker.id === pickedId,
-    );
-  }
 }
 
 function renderTaquinhos(intervals) {
@@ -1317,7 +1227,7 @@ function intervalSearchText(interval) {
     interval.info || "",
     depthSpan(interval),
     formatMeters(interval.avancoMm),
-    formatTaquinhoMeters(interval.recuperacaoMm),
+    formatMeters(interval.recuperacaoMm),
     interval.geo?.litologia || "",
     interval.geo?.alteracao || "",
     interval.geo?.fraturamento || "",
@@ -1359,7 +1269,7 @@ function renderList(intervals) {
     li.style.setProperty("--card-color", color);
     const hasCore = t.recuperacaoMm > 0;
     if (!hasCore) li.classList.add("is-empty-recovery");
-    else if (roundedRecoveryMm(t.recuperacaoMm) < t.avancoMm) li.classList.add("is-partial");
+    else if (t.recuperacaoMm < t.avancoMm) li.classList.add("is-partial");
     else if (recoveryExceedsAdvance(t.avancoMm, t.recuperacaoMm)) li.classList.add("is-excess");
     const place = intervalBlock(t);
     const where = place
@@ -1373,12 +1283,12 @@ function renderList(intervals) {
         : "—";
     const badge = !hasCore
       ? `<span class="loss-badge is-zero">Sem testemunho</span>`
-      : roundedRecoveryMm(t.recuperacaoMm) < t.avancoMm
+      : t.recuperacaoMm < t.avancoMm
         ? `<span class="loss-badge">Perda</span>`
         : recoveryExceedsAdvance(t.avancoMm, t.recuperacaoMm)
           ? `<span class="loss-badge is-excess">R &gt; A</span>`
           : "";
-    const tone = ratioTone(t.avancoMm > 0 ? (roundedRecoveryMm(t.recuperacaoMm) / t.avancoMm) * 100 : null);
+    const tone = ratioTone(t.avancoMm > 0 ? (t.recuperacaoMm / t.avancoMm) * 100 : null);
     const open = openCardId === t.id;
     li.classList.toggle("is-open", open);
     li.innerHTML = `
@@ -1388,14 +1298,14 @@ function renderList(intervals) {
           <strong>Taquinho ${t.index + 1}${badge}</strong>
           <span class="card-meta">${depth}</span>
         </span>
-        <span class="card-pct ${tone}">${formatRatio(t.avancoMm, roundedRecoveryMm(t.recuperacaoMm))}</span>
+        <span class="card-pct ${tone}">${formatRatio(t.avancoMm, t.recuperacaoMm)}</span>
         <span class="card-chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4.5 6.2 8 9.8l3.5-3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </button>
       <div class="card-panel">
         <dl class="specs">
           <div class="spec-line"><dt>Avanço</dt><dd>${formatTaquinhoMeters(t.avancoMm)}</dd></div>
           <div class="spec-line"><dt>Recuperação</dt><dd>${formatTaquinhoMeters(t.recuperacaoMm)}</dd></div>
-          <div class="spec-line"><dt>Percentual</dt><dd>${formatRatio(t.avancoMm, roundedRecoveryMm(t.recuperacaoMm))}</dd></div>
+          <div class="spec-line"><dt>Percentual</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
           <div class="spec-line"><dt>Na caixa</dt><dd>${recovered}</dd></div>
           <div class="spec-line"><dt>Posição</dt><dd>${where}</dd></div>
           <div class="spec-line"><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
@@ -1411,62 +1321,7 @@ function renderList(intervals) {
             : ""
         }
         ${t.info ? `<p class="card-info">${escapeHtml(t.info)}</p>` : ""}
-        ${
-          t.recuperacaoMm > 0
-            ? `<div class="card-cuts" data-cuts-for="${t.id}">
-          <p class="card-note">Cortes só redistribuem o desenho do testemunho; a recuperação numérica não muda.</p>
-          <ul class="cut-list"></ul>
-          <label class="field field--inline"><span>Novo corte (m)</span><input type="text" inputmode="decimal" placeholder="0,96" class="cut-input" /></label>
-          <button type="button" class="btn-quiet cut-add">Adicionar corte</button>
-        </div>`
-            : ""
-        }
       </div>`;
-    const cutsBox = li.querySelector(".card-cuts");
-    if (cutsBox) {
-      const list = cutsBox.querySelector(".cut-list");
-      const renderCuts = () => {
-        if (!list) return;
-        list.replaceChildren();
-        for (const cut of normalizeCortes(t.cortes, t.recuperacaoMm)) {
-          const item = document.createElement("li");
-          item.textContent = formatMeters(cut.offsetMm);
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "btn-quiet";
-          remove.textContent = "Remover";
-          remove.addEventListener("click", () => {
-            const target = taquinhos.find((row) => row.id === t.id);
-            if (!target) return;
-            snapshotLog("Corte removido");
-            target.cortes = normalizeCortes(target.cortes, target.recuperacaoMm).filter((row) => row.id !== cut.id);
-            renderAll();
-          });
-          item.appendChild(remove);
-          list.appendChild(item);
-        }
-      };
-      renderCuts();
-      cutsBox.querySelector(".cut-add")?.addEventListener("click", () => {
-        const input = cutsBox.querySelector(".cut-input");
-        const parsed = parseMetersToMm(input?.value || "");
-        const target = taquinhos.find((row) => row.id === t.id);
-        if (!target) return;
-        if (!parsed.ok || parsed.mm <= 0 || parsed.mm >= target.recuperacaoMm) {
-          showError("Informe a posição do corte dentro da recuperação real (maior que 0 e menor que a recuperação).");
-          return;
-        }
-        snapshotLog("Corte adicionado");
-        const next = normalizeCortes([...(target.cortes || []), { id: crypto.randomUUID(), offsetMm: parsed.mm }], target.recuperacaoMm);
-        if (next.length === normalizeCortes(target.cortes, target.recuperacaoMm).length) {
-          showError("Já existe um corte nessa posição.");
-          return;
-        }
-        target.cortes = next;
-        if (input) input.value = "";
-        renderAll();
-      });
-    }
     const actions = document.createElement("div");
     actions.className = "card-actions";
     const editBtn = document.createElement("button");
@@ -1511,7 +1366,6 @@ function renderList(intervals) {
       if (editingId === t.id) beginEdit(null);
       if (selectedId === t.id) selectedId = null;
       taquinhos = taquinhos.filter((x) => x.id !== t.id);
-      pruneTaquinhoLabels();
       clearConsulta();
       showNote("");
       renderAll();
@@ -1610,6 +1464,7 @@ function renderAll() {
   buildTopView();
   renderCores(intervals);
   renderTaquinhos(intervals);
+  renderMeterMarks(intervals);
   renderConsulta();
   renderBoxRail();
   renderIntervalPanel();
@@ -1714,7 +1569,6 @@ function bindForm() {
       snapshotLog("Taquinho editado");
       current.avancoMm = avanco.mm;
       current.recuperacaoMm = recuperacao.mm;
-      current.cortes = normalizeCortes(current.cortes, recuperacao.mm);
       current.info = info;
       current.color = color;
       current.geo = geo;
@@ -1899,6 +1753,7 @@ function focusBox(index) {
     const intervals = currentIntervals();
     renderCores(intervals);
     renderTaquinhos(intervals);
+    renderMeterMarks(intervals);
     renderConsulta();
     fitCamera();
   } else {
@@ -2414,36 +2269,24 @@ function layoutTaquinhoFaces() {
   layer.replaceChildren();
   const wrap = layer.getBoundingClientRect();
   if (wrap.width < 8 || wrap.height < 8) return;
-  const labels = currentTaquinhoLabels();
 
   document.querySelectorAll("#taquinhos-root .taquinho").forEach((node) => {
     const block = node.querySelector(".taquinho-block");
     if (!block) return;
     const box = block.getBoundingClientRect();
     if (box.width < 2 || box.height < 2) return;
-    const id = node.getAttribute("data-id") || "";
     const lines = (node.getAttribute("data-label") || "").split("|").filter(Boolean);
+    if (lines.length === 0) return;
     const face = document.createElement("div");
     face.className = "taquinho-face";
-    face.dataset.id = id;
+    face.dataset.id = node.getAttribute("data-id") || "";
     face.title = lines.join("\n");
     face.style.left = `${box.left - wrap.left}px`;
     face.style.top = `${box.top - wrap.top}px`;
     face.style.width = `${box.width}px`;
     face.style.height = `${box.height}px`;
     layer.appendChild(face);
-    if (lines.length) paintTaquinhoFace(face, lines);
-    for (const label of labels.filter((item) => item.taquinhoId === id)) {
-      const tag = document.createElement("span");
-      tag.className = "taquinho-label";
-      tag.dataset.labelId = label.id;
-      tag.textContent = label.text;
-      tag.style.fontSize = `${label.fontPx}px`;
-      tag.style.left = `${label.xPct}%`;
-      tag.style.top = `${label.yPct}%`;
-      tag.title = "Arraste para mover · duplo clique para editar";
-      face.appendChild(tag);
-    }
+    paintTaquinhoFace(face, lines);
   });
 }
 
@@ -2511,7 +2354,7 @@ function readingFromPointer(core, point) {
   const endMm = Number(core.getAttribute("data-abs-end-mm"));
   const localCm = Math.min(LENGTH, Math.max(0, LENGTH - (point.y - box.y0)));
   const absMm = Math.min(endMm, Math.max(startMm, channelIndex * LENGTH * MM + localCm * MM));
-  const offsetMm = Math.round(recoveryOffsetFromPhysical(interval, absMm));
+  const offsetMm = Math.round(absMm - interval.physicalInicialMm);
   const depthUm = estimateDepthUm(interval, offsetMm);
   if (depthUm == null) return null;
   const place = physicalPlace(Math.round(absMm * 1000));
@@ -2668,21 +2511,8 @@ function bindProbe() {
     setActiveInterval(interval.id);
   });
   layer?.addEventListener("pointerdown", (event) => {
-    if (event.target instanceof Element && event.target.closest(".taquinho-label")) return;
-    const face = event.target instanceof Element ? event.target.closest(".taquinho-face") : null;
-    const faceId = face?.dataset.id;
-    if (faceId && faceId !== "fim") {
-      selectedId = faceId;
-      document.querySelectorAll(".core, .taquinho, #taquinho-list > li").forEach((node) => {
-        const nodeId = node.dataset.id || node.getAttribute("data-id");
-        node.classList.toggle("is-picked", nodeId === faceId);
-      });
-    }
     const interval = showFace(event);
-    if (!interval) {
-      if (faceId) setActiveInterval(faceId);
-      return;
-    }
+    if (!interval) return;
     probePin = null;
     clearProbeDrawing();
     showTagTip(interval, event.clientX, event.clientY);
@@ -3006,8 +2836,6 @@ function serializeLog(items) {
     };
     const geo = normalizeGeo(item.geo);
     if (!geoIsEmpty(geo)) row.geo = geo;
-    const cortes = normalizeCortes(item.cortes, item.recuperacaoMm);
-    if (cortes.length) row.cortes = cortes;
     return row;
   });
 }
@@ -3030,64 +2858,9 @@ function sanitizeStored(items) {
     };
     const geo = normalizeGeo(item.geo);
     if (!geoIsEmpty(geo)) row.geo = geo;
-    const cortes = normalizeCortes(item.cortes, recuperacaoMm);
-    if (cortes.length) row.cortes = cortes;
     stored.push(row);
   }
   return stored;
-}
-
-function sanitizeManualTaquinhos(list) {
-  if (!Array.isArray(list)) return [];
-  const out = [];
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-    const box = Math.floor(Number(item.box));
-    const channel = Math.floor(Number(item.channel));
-    let localStartCm = Math.round(Number(item.localStartCm));
-    if (!Number.isFinite(box) || box < 0) continue;
-    if (!Number.isFinite(channel) || channel < 0 || channel >= CHANNELS) continue;
-    if (!Number.isFinite(localStartCm)) continue;
-    if (localStartCm % 2 === 0) localStartCm -= 1;
-    if (localStartCm < 1 || localStartCm > 97) continue;
-    out.push({
-      id: typeof item.id === "string" && item.id ? item.id : crypto.randomUUID(),
-      box,
-      channel,
-      localStartCm,
-    });
-  }
-  return out;
-}
-
-function sanitizeTaquinhoLabels(list) {
-  if (!Array.isArray(list)) return [];
-  const out = [];
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-    const taquinhoId = typeof item.taquinhoId === "string" ? item.taquinhoId : "";
-    if (!taquinhoId) continue;
-    const text = String(item.text || "").trim().slice(0, 40);
-    if (!text) continue;
-    let fontPx = Math.round(Number(item.fontPx));
-    if (!Number.isFinite(fontPx)) fontPx = 10;
-    fontPx = Math.min(28, Math.max(6, fontPx));
-    let xPct = Math.round(Number(item.xPct));
-    let yPct = Math.round(Number(item.yPct));
-    if (!Number.isFinite(xPct)) xPct = 50;
-    if (!Number.isFinite(yPct)) yPct = 50;
-    xPct = Math.min(100, Math.max(0, xPct));
-    yPct = Math.min(100, Math.max(0, yPct));
-    out.push({
-      id: typeof item.id === "string" && item.id ? item.id : crypto.randomUUID(),
-      taquinhoId,
-      text,
-      fontPx,
-      xPct,
-      yPct,
-    });
-  }
-  return out;
 }
 
 function sanitizeHole(raw) {
@@ -3096,52 +2869,8 @@ function sanitizeHole(raw) {
     id: typeof raw.id === "string" && raw.id ? raw.id : crypto.randomUUID(),
     name: String(raw.name || "").slice(0, 32),
     items: sanitizeStored(raw.items),
-    manualTaquinhos: sanitizeManualTaquinhos(raw.manualTaquinhos),
-    taquinhoLabels: sanitizeTaquinhoLabels(raw.taquinhoLabels),
     ended: raw.ended === true,
   };
-}
-
-function currentManualTaquinhos() {
-  return currentHole()?.manualTaquinhos || [];
-}
-
-function currentTaquinhoLabels() {
-  return currentHole()?.taquinhoLabels || [];
-}
-
-function placeFromManual(marker) {
-  const channelIndex = marker.box * CHANNELS + marker.channel;
-  const start = channelIndex * LENGTH * MM + marker.localStartCm * MM;
-  const end = start + TOP_LEN * MM;
-  return {
-    box: marker.box,
-    channel: marker.channel,
-    slotStart: channelIndex * LENGTH,
-    topStart: start / MM,
-    topEnd: end / MM,
-    bodyStart: start / MM + OVERHANG,
-    bodyEnd: end / MM - OVERHANG,
-    shifted: false,
-    manual: true,
-  };
-}
-
-function ensureHoleExtras(hole) {
-  if (!hole) return;
-  if (!Array.isArray(hole.manualTaquinhos)) hole.manualTaquinhos = [];
-  if (!Array.isArray(hole.taquinhoLabels)) hole.taquinhoLabels = [];
-}
-
-function pruneTaquinhoLabels() {
-  const hole = currentHole();
-  if (!hole) return;
-  ensureHoleExtras(hole);
-  const valid = new Set([
-    ...taquinhos.map((item) => item.id),
-    ...hole.manualTaquinhos.map((item) => item.id),
-  ]);
-  hole.taquinhoLabels = hole.taquinhoLabels.filter((label) => valid.has(label.taquinhoId));
 }
 
 function cloneItems(items) {
@@ -3165,22 +2894,21 @@ function renderHoleStatus(intervals) {
       const recovery = document.getElementById("stat-recovery");
       const ratio = document.getElementById("stat-ratio");
       const boxes = document.getElementById("stat-boxes");
-      const roundedRecovery = sumRoundedRecoveryMm(intervals);
       if (advance) advance.textContent = formatMeters(last.profundidadeFinalMm);
-      if (recovery) recovery.textContent = formatMeters(roundedRecovery);
-      if (ratio) ratio.textContent = formatRatio(last.profundidadeFinalMm, roundedRecovery);
+      if (recovery) recovery.textContent = formatMeters(last.recuperacaoFinalMm);
+      if (ratio) ratio.textContent = formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm);
       if (boxes) boxes.textContent = String(boxCount());
       const channels = document.getElementById("stat-channels");
       const loss = document.getElementById("stat-loss");
       if (channels) channels.textContent = String(usedChannels(intervals));
       if (loss) {
-        const count = intervals.filter((interval) => roundedRecoveryMm(interval.recuperacaoMm) < interval.avancoMm).length;
+        const count = intervals.filter((interval) => interval.recuperacaoMm < interval.avancoMm).length;
         loss.textContent = String(count);
       }
       renderAudit(intervals);
       renderLithologyLegend(intervals);
       const pct = last.profundidadeFinalMm > 0
-        ? Math.round((roundedRecovery / last.profundidadeFinalMm) * 1000) / 10
+        ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
         : null;
       if (ratio) {
         ratio.classList.toggle("is-bad", pct != null && pct < 70);
@@ -3238,14 +2966,13 @@ function holeFacts(hole) {
   const intervals = accumulateIntervals(hole.items);
   const last = intervals[intervals.length - 1];
   if (!last) return null;
-  const roundedRecovery = sumRoundedRecoveryMm(intervals);
   const pct = last.profundidadeFinalMm > 0
-    ? Math.round((roundedRecovery / last.profundidadeFinalMm) * 1000) / 10
+    ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
     : null;
   return {
     depth: formatMeters(last.profundidadeFinalMm),
-    recovery: formatMeters(roundedRecovery),
-    ratio: formatRatio(last.profundidadeFinalMm, roundedRecovery),
+    recovery: formatMeters(last.recuperacaoFinalMm),
+    ratio: formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm),
     pct,
     boxes: boxesFor(intervals, hole.ended),
   };
@@ -3598,7 +3325,7 @@ function usedChannels(intervals) {
     const place = intervalBlock(interval);
     if (place) maxIndex = Math.max(maxIndex, place.box * CHANNELS + place.channel);
     if (interval.recuperacaoMm <= 0) continue;
-    for (const seg of intervalMaterialSegments(interval)) {
+    for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
       maxIndex = Math.max(maxIndex, seg.channelIndex);
     }
   }
@@ -3990,7 +3717,7 @@ function renderIntervalPanel() {
       ["Profundidade", formatTaquinhoSpan(interval.profundidadeInicialMm, interval.profundidadeFinalMm)],
       ["Avanço", formatTaquinhoMeters(interval.avancoMm)],
       ["Recuperação", formatTaquinhoMeters(interval.recuperacaoMm)],
-      ["Percentual", formatRatio(interval.avancoMm, roundedRecoveryMm(interval.recuperacaoMm))],
+      ["Percentual", formatRatio(interval.avancoMm, interval.recuperacaoMm)],
       ["Na caixa", place ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}` : "Sem testemunho"],
     ];
     if (interval.geo?.litologia) rows.push(["Litologia", interval.geo.litologia]);
@@ -4287,7 +4014,7 @@ function intervalLine(interval) {
     ? `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`
     : "—";
   const geo = interval.geo?.litologia ? ` · ${interval.geo.litologia}` : "";
-  return `${interval.index + 1}. P ${depthSpan(interval)} · A ${formatMeters(interval.avancoMm)} · R ${formatTaquinhoMeters(interval.recuperacaoMm)} (${formatRatio(interval.avancoMm, roundedRecoveryMm(interval.recuperacaoMm))}) · na caixa ${inbox} · ${where}${geo}${interval.info ? ` · ${interval.info}` : ""}`;
+  return `${interval.index + 1}. P ${depthSpan(interval)} · A ${formatMeters(interval.avancoMm)} · R ${formatMeters(interval.recuperacaoMm)} (${formatRatio(interval.avancoMm, interval.recuperacaoMm)}) · na caixa ${inbox} · ${where}${geo}${interval.info ? ` · ${interval.info}` : ""}`;
 }
 
 function reportText() {
@@ -4298,7 +4025,7 @@ function reportText() {
   const lines = [
     `Pandora · Furo ${name}`,
     `Avanço ${formatMeters(last.profundidadeFinalMm)}`,
-    `Recuperação ${formatMeters(sumRoundedRecoveryMm(intervals))} (${formatRatio(last.profundidadeFinalMm, sumRoundedRecoveryMm(intervals))})`,
+    `Recuperação ${formatMeters(last.recuperacaoFinalMm)} (${formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm)})`,
     `Caixas ${boxCount()}`,
     "",
   ];
@@ -4344,11 +4071,11 @@ function downloadTable() {
       String(interval.index + 1),
       depthSpan(interval),
       formatMeters(interval.avancoMm),
-      formatTaquinhoMeters(interval.recuperacaoMm),
+      formatMeters(interval.recuperacaoMm),
       inbox,
       place ? String(place.box + 1) : "",
       place ? String(place.channel + 1) : "",
-      formatRatio(interval.avancoMm, roundedRecoveryMm(interval.recuperacaoMm)),
+      formatRatio(interval.avancoMm, interval.recuperacaoMm),
       materialName(normalizeHex(interval.color)),
       interval.info || "",
       interval.geo?.litologia || "",
@@ -4384,8 +4111,6 @@ function downloadHole() {
   persistHoles();
   const payload = { name: hole.name, items: hole.items };
   if (hole.ended) payload.ended = true;
-  if (hole.manualTaquinhos?.length) payload.manualTaquinhos = hole.manualTaquinhos;
-  if (hole.taquinhoLabels?.length) payload.taquinhoLabels = hole.taquinhoLabels;
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   });
@@ -4417,8 +4142,6 @@ function importHoleFile(file) {
         id: crypto.randomUUID(),
         name: String(raw?.name || raw?.furo || "Importado").slice(0, 32),
         items,
-        manualTaquinhos: sanitizeManualTaquinhos(raw?.manualTaquinhos),
-        taquinhoLabels: sanitizeTaquinhoLabels(raw?.taquinhoLabels),
         ended: raw?.ended === true,
       };
       holes.push(hole);
@@ -4505,11 +4228,11 @@ async function fillPrintSheet(mode) {
     if (mode !== "sheet") return true;
     const place = intervalBlock(interval);
     if (interval.recuperacaoMm <= 0) return Boolean(place && place.box === boxIndex);
-    return intervalMaterialSegments(interval).some((seg) => seg.box === boxIndex);
+    return recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm).some((seg) => seg.box === boxIndex);
   });
   const title = mode === "sheet" ? `Ficha da caixa ${String(boxIndex + 1).padStart(2, "0")}` : "Relatório da sondagem";
   const head = last
-    ? `Avanço ${formatMeters(last.profundidadeFinalMm)} · Recuperação ${formatMeters(sumRoundedRecoveryMm(intervals))} · ${formatRatio(last.profundidadeFinalMm, sumRoundedRecoveryMm(intervals))} · ${boxCount()} caixa(s) · ${usedChannels(intervals)} canaleta(s)`
+    ? `Avanço ${formatMeters(last.profundidadeFinalMm)} · Recuperação ${formatMeters(last.recuperacaoFinalMm)} · ${formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm)} · ${boxCount()} caixa(s) · ${usedChannels(intervals)} canaleta(s)`
     : "Nenhum intervalo lançado.";
   sheet.replaceChildren();
   const h1 = document.createElement("h1");
@@ -4537,8 +4260,8 @@ async function fillPrintSheet(mode) {
       String(interval.index + 1),
       depthSpan(interval),
       formatMeters(interval.avancoMm),
-      formatTaquinhoMeters(interval.recuperacaoMm),
-      formatRatio(interval.avancoMm, roundedRecoveryMm(interval.recuperacaoMm)),
+      formatMeters(interval.recuperacaoMm),
+      formatRatio(interval.avancoMm, interval.recuperacaoMm),
       where,
       geo,
     ]) {
@@ -4731,7 +4454,10 @@ function meterMarksOn() {
 
 function syncMeterMarksButton() {
   const on = meterMarksOn();
-  document.getElementById("tray-svg")?.classList.toggle("meters-off", !on);
+  const svg = document.getElementById("tray-svg");
+  svg?.classList.toggle("meters-off", !on);
+  svg?.classList.toggle("meters-on", on);
+  document.querySelector(".tray-stage")?.classList.toggle("meters-on", on);
   const button = document.getElementById("meter-toggle");
   if (!button) return;
   button.setAttribute("aria-pressed", on ? "true" : "false");
@@ -4766,236 +4492,6 @@ function closeHoleMenu() {
   if (!more || !actions || actions.hidden) return;
   actions.hidden = true;
   more.setAttribute("aria-expanded", "false");
-}
-
-function openManualTaquinhoDialog(id = null) {
-  const hole = currentHole();
-  const dialog = document.getElementById("manual-taquinho-dialog");
-  const form = document.getElementById("manual-taquinho-form");
-  const title = document.getElementById("manual-taquinho-title");
-  const del = document.getElementById("manual-taquinho-delete");
-  if (!hole || !(dialog instanceof HTMLDialogElement) || !(form instanceof HTMLFormElement)) return;
-  ensureHoleExtras(hole);
-  editingManualId = id;
-  const marker = id ? hole.manualTaquinhos.find((item) => item.id === id) : null;
-  if (title) title.textContent = marker ? "Editar taquinho manual" : "Adicionar taquinho manual";
-  form.box.value = String((marker?.box ?? focusedBox ?? 0) + 1);
-  form.channel.value = String((marker?.channel ?? 0) + 1);
-  form.localStartCm.value = String(marker?.localStartCm ?? 1);
-  if (del) del.hidden = !marker;
-  dialog.showModal();
-}
-
-function bindManualTaquinhoUi() {
-  document.getElementById("manual-taquinho-open")?.addEventListener("click", () => {
-    openManualTaquinhoDialog(null);
-  });
-  const form = document.getElementById("manual-taquinho-form");
-  const dialog = document.getElementById("manual-taquinho-dialog");
-  const del = document.getElementById("manual-taquinho-delete");
-  form?.addEventListener("submit", (event) => {
-    if (event.submitter && event.submitter.value === "cancel") {
-      editingManualId = null;
-      return;
-    }
-    event.preventDefault();
-    const hole = currentHole();
-    if (!hole || !(form instanceof HTMLFormElement)) return;
-    ensureHoleExtras(hole);
-    const box = Math.floor(Number(form.box.value)) - 1;
-    const channel = Math.floor(Number(form.channel.value)) - 1;
-    let localStartCm = Math.round(Number(form.localStartCm.value));
-    if (localStartCm % 2 === 0) localStartCm -= 1;
-    if (box < 0 || channel < 0 || channel >= CHANNELS || localStartCm < 1 || localStartCm > 97) {
-      showError("Informe caixa, canaleta (1–3) e friso ímpar entre 1 e 97 cm.");
-      return;
-    }
-    snapshotLog("Taquinho manual");
-    if (editingManualId) {
-      const current = hole.manualTaquinhos.find((item) => item.id === editingManualId);
-      if (current) {
-        current.box = box;
-        current.channel = channel;
-        current.localStartCm = localStartCm;
-      }
-    } else {
-      hole.manualTaquinhos.push({
-        id: crypto.randomUUID(),
-        box,
-        channel,
-        localStartCm,
-      });
-    }
-    editingManualId = null;
-    if (dialog instanceof HTMLDialogElement) dialog.close();
-    persistHoles();
-    renderAll();
-    showNote("Taquinho manual atualizado.");
-  });
-  del?.addEventListener("click", () => {
-    const hole = currentHole();
-    if (!hole || !editingManualId) return;
-    snapshotLog("Taquinho manual removido");
-    hole.manualTaquinhos = hole.manualTaquinhos.filter((item) => item.id !== editingManualId);
-    if (selectedId === editingManualId) selectedId = null;
-    pruneTaquinhoLabels();
-    editingManualId = null;
-    if (dialog instanceof HTMLDialogElement) dialog.close();
-    persistHoles();
-    renderAll();
-  });
-}
-
-function openTaquinhoLabelDialog(labelId = null) {
-  const hole = currentHole();
-  const dialog = document.getElementById("taquinho-label-dialog");
-  const form = document.getElementById("taquinho-label-form");
-  const title = document.getElementById("taquinho-label-title");
-  const del = document.getElementById("taquinho-label-delete");
-  if (!hole || !(dialog instanceof HTMLDialogElement) || !(form instanceof HTMLFormElement)) return;
-  ensureHoleExtras(hole);
-  const targetId = selectedId;
-  if (!targetId || targetId === "fim") {
-    showError("Selecione um taquinho na caixa antes de adicionar texto.");
-    return;
-  }
-  const known =
-    taquinhos.some((item) => item.id === targetId) ||
-    hole.manualTaquinhos.some((item) => item.id === targetId);
-  if (!known) {
-    showError("Selecione um taquinho válido na caixa.");
-    return;
-  }
-  editingLabelId = labelId;
-  const label = labelId ? hole.taquinhoLabels.find((item) => item.id === labelId) : null;
-  if (title) title.textContent = label ? "Editar texto do taquinho" : "Texto no taquinho";
-  form.text.value = label?.text || "";
-  form.fontPx.value = String(label?.fontPx ?? 10);
-  form.xPct.value = String(label?.xPct ?? 50);
-  form.yPct.value = String(label?.yPct ?? 50);
-  if (del) del.hidden = !label;
-  dialog.showModal();
-}
-
-function bindTaquinhoLabelUi() {
-  document.getElementById("taquinho-label-open")?.addEventListener("click", () => {
-    openTaquinhoLabelDialog(null);
-  });
-  const form = document.getElementById("taquinho-label-form");
-  const dialog = document.getElementById("taquinho-label-dialog");
-  const del = document.getElementById("taquinho-label-delete");
-  form?.addEventListener("submit", (event) => {
-    if (event.submitter && event.submitter.value === "cancel") {
-      editingLabelId = null;
-      return;
-    }
-    event.preventDefault();
-    const hole = currentHole();
-    if (!hole || !(form instanceof HTMLFormElement) || !selectedId) return;
-    ensureHoleExtras(hole);
-    const text = String(form.text.value || "").trim().slice(0, 40);
-    let fontPx = Math.round(Number(form.fontPx.value));
-    let xPct = Math.round(Number(form.xPct.value));
-    let yPct = Math.round(Number(form.yPct.value));
-    if (!text) {
-      showError("Informe o texto.");
-      return;
-    }
-    fontPx = Math.min(28, Math.max(6, Number.isFinite(fontPx) ? fontPx : 10));
-    xPct = Math.min(100, Math.max(0, Number.isFinite(xPct) ? xPct : 50));
-    yPct = Math.min(100, Math.max(0, Number.isFinite(yPct) ? yPct : 50));
-    snapshotLog("Texto do taquinho");
-    if (editingLabelId) {
-      const current = hole.taquinhoLabels.find((item) => item.id === editingLabelId);
-      if (current) {
-        current.text = text;
-        current.fontPx = fontPx;
-        current.xPct = xPct;
-        current.yPct = yPct;
-      }
-    } else {
-      hole.taquinhoLabels.push({
-        id: crypto.randomUUID(),
-        taquinhoId: selectedId,
-        text,
-        fontPx,
-        xPct,
-        yPct,
-      });
-    }
-    editingLabelId = null;
-    if (dialog instanceof HTMLDialogElement) dialog.close();
-    persistHoles();
-    renderAll();
-    showNote("Texto do taquinho atualizado.");
-  });
-  del?.addEventListener("click", () => {
-    const hole = currentHole();
-    if (!hole || !editingLabelId) return;
-    snapshotLog("Texto do taquinho removido");
-    hole.taquinhoLabels = hole.taquinhoLabels.filter((item) => item.id !== editingLabelId);
-    editingLabelId = null;
-    if (dialog instanceof HTMLDialogElement) dialog.close();
-    persistHoles();
-    renderAll();
-  });
-
-  const layer = document.getElementById("tag-layer");
-  let drag = null;
-  layer?.addEventListener("pointerdown", (event) => {
-    const tag = event.target instanceof Element ? event.target.closest(".taquinho-label") : null;
-    if (!tag || !(event.target instanceof Element)) return;
-    const hole = currentHole();
-    const label = hole?.taquinhoLabels?.find((item) => item.id === tag.dataset.labelId);
-    const face = tag.closest(".taquinho-face");
-    if (!label || !face) return;
-    event.preventDefault();
-    event.stopPropagation();
-    selectedId = label.taquinhoId;
-    drag = {
-      id: label.id,
-      face,
-      pointerId: event.pointerId,
-    };
-    tag.classList.add("is-drag");
-    tag.setPointerCapture?.(event.pointerId);
-  });
-  layer?.addEventListener("pointermove", (event) => {
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    const hole = currentHole();
-    const label = hole?.taquinhoLabels?.find((item) => item.id === drag.id);
-    if (!label) return;
-    const rect = drag.face.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) return;
-    label.xPct = Math.min(100, Math.max(0, Math.round(((event.clientX - rect.left) / rect.width) * 100)));
-    label.yPct = Math.min(100, Math.max(0, Math.round(((event.clientY - rect.top) / rect.height) * 100)));
-    const tag = drag.face.querySelector(`[data-label-id="${CSS.escape(drag.id)}"]`);
-    if (tag instanceof HTMLElement) {
-      tag.style.left = `${label.xPct}%`;
-      tag.style.top = `${label.yPct}%`;
-    }
-  });
-  const endDrag = (event) => {
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    const tag = drag.face.querySelector(`[data-label-id="${CSS.escape(drag.id)}"]`);
-    tag?.classList.remove("is-drag");
-    drag = null;
-    persistHoles();
-  };
-  layer?.addEventListener("pointerup", endDrag);
-  layer?.addEventListener("pointercancel", endDrag);
-  layer?.addEventListener("dblclick", (event) => {
-    const tag = event.target instanceof Element ? event.target.closest(".taquinho-label") : null;
-    if (tag?.dataset.labelId) {
-      event.preventDefault();
-      openTaquinhoLabelDialog(tag.dataset.labelId);
-      return;
-    }
-    const face = event.target instanceof Element ? event.target.closest(".taquinho-face") : null;
-    if (!face?.dataset.id) return;
-    const manual = currentManualTaquinhos().find((item) => item.id === face.dataset.id);
-    if (manual) openManualTaquinhoDialog(manual.id);
-  });
 }
 
 function bindChrome() {
@@ -5080,8 +4576,6 @@ function bindChrome() {
   document.getElementById("fim-toggle")?.addEventListener("click", () => {
     setHoleEnded(!currentHole()?.ended);
   });
-  bindManualTaquinhoUi();
-  bindTaquinhoLabelUi();
   document.getElementById("view-solo")?.addEventListener("click", () => {
     soloBox = !soloBox;
     const button = document.getElementById("view-solo");
@@ -5174,7 +4668,7 @@ function bulletinChannels(intervals, ended) {
     const place = intervalBlock(interval);
     if (place) maxIndex = Math.max(maxIndex, place.box * CHANNELS + place.channel);
     if (interval.recuperacaoMm <= 0) continue;
-    for (const seg of intervalMaterialSegments(interval)) {
+    for (const seg of recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm)) {
       maxIndex = Math.max(maxIndex, seg.channelIndex);
     }
   }
@@ -5194,7 +4688,7 @@ function bulletinPlace(interval) {
       marker: markerLabel,
     };
   }
-  const segs = intervalMaterialSegments(interval);
+  const segs = recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm);
   return {
     core: `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`,
     boxes: [...new Set(segs.map((seg) => seg.box + 1))],
@@ -5206,7 +4700,7 @@ function bulletinPlace(interval) {
 function bulletinTone(interval) {
   if (!(interval.avancoMm > 0) || interval.recuperacaoMm < 0 || recoveryExceedsAdvance(interval.avancoMm, interval.recuperacaoMm)) return "is-error";
   if (interval.recuperacaoMm === 0) return "is-bad";
-  const pct = (roundedRecoveryMm(interval.recuperacaoMm) / interval.avancoMm) * 100;
+  const pct = (interval.recuperacaoMm / interval.avancoMm) * 100;
   if (pct < 70) return "is-bad";
   if (pct < 90) return "is-warn";
   return "";
@@ -5236,11 +4730,10 @@ function buildBulletinModel(items, hole, generatedAt) {
   let zero = 0;
   let invalid = 0;
   const rows = placed.map((interval) => {
-    const displayRecoveryMm = roundedRecoveryMm(interval.recuperacaoMm);
     advance += interval.avancoMm;
-    recovery += displayRecoveryMm;
+    recovery += interval.recuperacaoMm;
     const valid = interval.avancoMm > 0 && interval.recuperacaoMm >= 0 && !recoveryExceedsAdvance(interval.avancoMm, interval.recuperacaoMm);
-    const lostMm = valid ? Math.max(0, interval.avancoMm - displayRecoveryMm) : null;
+    const lostMm = valid ? Math.max(0, interval.avancoMm - interval.recuperacaoMm) : null;
     if (!valid) {
       lostClosed = false;
       invalid += 1;
@@ -5255,13 +4748,13 @@ function buildBulletinModel(items, hole, generatedAt) {
       to: formatMeters(interval.profundidadeFinalMm),
       depth: depthSpan(interval),
       advanceMm: interval.avancoMm,
-      recoveryMm: displayRecoveryMm,
+      recoveryMm: interval.recuperacaoMm,
       lostMm,
       advance: formatMeters(interval.avancoMm),
-      recovery: formatMeters(displayRecoveryMm),
+      recovery: formatMeters(interval.recuperacaoMm),
       lost: lostMm == null ? "—" : formatMeters(lostMm),
-      ratio: formatRatio(interval.avancoMm, displayRecoveryMm),
-      pct: interval.avancoMm > 0 ? (displayRecoveryMm / interval.avancoMm) * 100 : null,
+      ratio: formatRatio(interval.avancoMm, interval.recuperacaoMm),
+      pct: interval.avancoMm > 0 ? (interval.recuperacaoMm / interval.avancoMm) * 100 : null,
       boxes: joinList(place.boxes),
       channels: joinList(place.channels),
       where: place.core
@@ -5380,8 +4873,6 @@ if (typeof module !== "undefined" && module.exports) {
     formatMeters,
     roundCoreMm,
     formatTaquinhoMeters,
-    roundedRecoveryMm,
-    sumRoundedRecoveryMm,
     findIntervalAtDepth,
     findIntervalAtRecovery,
     tapeUmFromDepth,
@@ -5399,13 +4890,6 @@ if (typeof module !== "undefined" && module.exports) {
     meterMarkPositions,
     recoveryExceedsAdvance,
     skipMinimumBoxRemainder,
-    inChannelStartMargin,
-    distributeRecovery,
-    normalizeCortes,
-    intervalMaterialSegments,
-    placeFromManual,
-    sanitizeManualTaquinhos,
-    sanitizeTaquinhoLabels,
     normalizeGeo,
     geoIsEmpty,
     buildBulletinModel,

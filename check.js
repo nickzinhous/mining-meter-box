@@ -50,51 +50,6 @@ check("até 2 cm acima do avanço fica na caixa e o taquinho mostra o arredondad
   assert.strictEqual(real[0].physicalFinalMm - real[0].physicalInicialMm, 980);
 });
 
-check("margem inicial da canaleta desloca o taquinho para o 2º friso", () => {
-  const exact = app.accumulateIntervals([interval(1000, 1000, "a")]);
-  const exactMark = app.placement(exact[0].physicalFinalMm);
-  assert.strictEqual(exact[0].physicalFinalMm - exact[0].physicalInicialMm, 1000);
-  assert.strictEqual(exactMark.channel, 1);
-  assert.strictEqual(exactMark.topStart, 101);
-  assert.strictEqual(exactMark.topEnd, 103);
-  assert.strictEqual(exactMark.shifted, true);
-
-  const overflow = app.accumulateIntervals([interval(1010, 1010, "b")]);
-  const overflowMark = app.placement(overflow[0].physicalFinalMm);
-  assert.strictEqual(overflow[0].physicalFinalMm - overflow[0].physicalInicialMm, 1010);
-  assert.strictEqual(overflowMark.channel, 1);
-  assert.strictEqual(overflowMark.topStart, 103);
-  assert.strictEqual(overflowMark.topEnd, 105);
-  assert.strictEqual(overflowMark.shifted, true);
-  assert.ok(app.inChannelStartMargin(1010));
-  assert.ok(!app.inChannelStartMargin(1000));
-  assert.ok(!app.inChannelStartMargin(1020));
-
-  const below = app.accumulateIntervals([interval(990, 990, "c")]);
-  const belowMark = app.placement(below[0].physicalFinalMm);
-  assert.strictEqual(belowMark.channel, 1);
-  assert.strictEqual(belowMark.topStart, 101);
-
-  const mid = app.accumulateIntervals([interval(1030, 1030, "d")]);
-  const midMark = app.placement(mid[0].physicalFinalMm);
-  assert.strictEqual(mid[0].physicalFinalMm - mid[0].physicalInicialMm, 1030);
-  assert.strictEqual(midMark.topStart, 103);
-
-  const ch2 = app.accumulateIntervals([interval(2010, 2010, "e")]);
-  const ch2Mark = app.placement(ch2[0].physicalFinalMm);
-  assert.strictEqual(ch2[0].physicalFinalMm - ch2[0].physicalInicialMm, 2010);
-  assert.strictEqual(ch2Mark.channel, 2);
-  assert.strictEqual(ch2Mark.topStart, 203);
-  assert.strictEqual(ch2Mark.topEnd, 205);
-
-  const full = app.accumulateIntervals([interval(3000, 3000, "f")]);
-  assert.strictEqual(full[0].physicalFinalMm - full[0].physicalInicialMm, 3000);
-  const fullMark = app.placement(full[0].physicalFinalMm);
-  assert.strictEqual(fullMark.box, 1);
-  assert.strictEqual(fullMark.channel, 0);
-  assert.strictEqual(fullMark.topStart, 301);
-});
-
 check("1 cm no fim da caixa não recebe material e 2 cm ainda recebem", () => {
   assert.strictEqual(app.skipMinimumBoxRemainder(2990), 3000);
   assert.strictEqual(app.skipMinimumBoxRemainder(5990), 6000);
@@ -146,47 +101,6 @@ check("perda no meio do testemunho estima o metro sobre o que foi recuperado", (
   );
 });
 
-check("recuperação zero na primeira manobra usa o 1º friso", () => {
-  const first = app.accumulateIntervals([interval(1000, 0, "a")]);
-  const mark = app.placement(first[0].physicalFinalMm);
-  assert.strictEqual(first[0].physicalFinalMm - first[0].physicalInicialMm, 0);
-  assert.strictEqual(mark.channel, 0);
-  assert.strictEqual(mark.topStart, 1);
-  assert.strictEqual(mark.topEnd, 3);
-
-  const positive = app.accumulateIntervals([interval(1000, 500, "b")]);
-  const positiveMark = app.placement(positive[0].physicalFinalMm);
-  assert.strictEqual(positive[0].physicalFinalMm - positive[0].physicalInicialMm, 500);
-  assert.ok(positiveMark.topStart >= 1);
-
-  const consecutive = app.accumulateIntervals([
-    interval(1000, 400, "a"),
-    interval(1000, 400, "b"),
-  ]);
-  const a = app.placement(consecutive[0].physicalFinalMm);
-  const b = app.placement(consecutive[1].physicalFinalMm);
-  assert.ok(b.topStart >= a.topEnd + 2);
-
-  const sandwiched = app.accumulateIntervals([
-    interval(1000, 400, "a"),
-    interval(1000, 0, "b"),
-    interval(1000, 400, "c"),
-  ]);
-  assert.strictEqual(sandwiched[1].physicalFinalMm, sandwiched[1].physicalInicialMm);
-  const mid = app.placement(sandwiched[1].physicalFinalMm);
-  const left = app.placement(sandwiched[0].physicalFinalMm);
-  assert.ok(mid.topStart >= left.topEnd + 2);
-
-  const twoZeros = app.accumulateIntervals([
-    interval(1000, 0, "a"),
-    interval(1000, 0, "b"),
-  ]);
-  const z0 = app.placement(twoZeros[0].physicalFinalMm);
-  const z1 = app.placement(twoZeros[1].physicalFinalMm);
-  assert.strictEqual(z0.topStart, 1);
-  assert.ok(z1.topStart >= z0.topEnd + 2);
-});
-
 check("recuperação zero ainda posiciona o metro no taquinho, sem abrir vão de testemunho", () => {
   const placed = app.accumulateIntervals([
     interval(1500, 1500, "a"),
@@ -233,67 +147,6 @@ check("a caixa guarda a recuperação real e o taquinho só arredonda o texto", 
   assert.strictEqual(app.formatTaquinhoMeters(2970), "2,95 m");
   assert.strictEqual(app.formatTaquinhoMeters(placed[0].avancoMm), "1,00 m");
   assert.strictEqual(app.formatTaquinhoMeters(placed[0].profundidadeFinalMm), "1,00 m");
-});
-
-check("cortes redistribuem o material sem mudar a recuperação", () => {
-  const plain = app.distributeRecovery(0, 1500, []);
-  assert.strictEqual(plain.finalMm, 1500);
-  assert.strictEqual(plain.segments.reduce((sum, seg) => sum + seg.lengthMm, 0), 1500);
-  assert.deepStrictEqual(
-    plain.segments.map((seg) => [seg.channel, seg.localStartMm, seg.localEndMm]),
-    [
-      [0, 0, 1000],
-      [1, 0, 500],
-    ],
-  );
-
-  const one = app.distributeRecovery(0, 1500, [{ id: "c1", offsetMm: 960 }]);
-  assert.strictEqual(one.segments.reduce((sum, seg) => sum + seg.lengthMm, 0), 1500);
-  assert.deepStrictEqual(
-    one.segments.map((seg) => [seg.channel, seg.localStartMm, seg.localEndMm]),
-    [
-      [0, 0, 960],
-      [1, 0, 540],
-    ],
-  );
-
-  const two = app.distributeRecovery(0, 1500, [
-    { id: "c1", offsetMm: 960 },
-    { id: "c2", offsetMm: 1200 },
-  ]);
-  assert.strictEqual(two.segments.reduce((sum, seg) => sum + seg.lengthMm, 0), 1500);
-  assert.deepStrictEqual(
-    two.segments.map((seg) => [seg.channel, seg.localStartMm, seg.localEndMm]),
-    [
-      [0, 0, 960],
-      [1, 0, 240],
-      [2, 0, 300],
-    ],
-  );
-
-  const placed = app.accumulateIntervals([
-    { id: "a", avancoMm: 1500, recuperacaoMm: 1500, info: "", color: "#8d5a32", cortes: [{ id: "c1", offsetMm: 960 }] },
-  ]);
-  assert.strictEqual(placed[0].recuperacaoMm, 1500);
-  assert.strictEqual(placed[0].physicalFinalMm, 1540);
-  assert.strictEqual(app.roundedRecoveryMm(placed[0].recuperacaoMm), 1500);
-});
-
-check("totais e porcentagem usam a recuperação arredondada sem alterar o desenho", () => {
-  const items = [interval(1000, 1020, "a"), interval(1000, 980, "b"), interval(3000, 2970, "c")];
-  assert.strictEqual(app.roundedRecoveryMm(1020), 1000);
-  assert.strictEqual(app.roundedRecoveryMm(980), 1000);
-  assert.strictEqual(app.roundedRecoveryMm(2970), 2950);
-  assert.strictEqual(app.sumRoundedRecoveryMm(items), 1000 + 1000 + 2950);
-  const placed = app.accumulateIntervals([interval(1000, 1020, "a")]);
-  assert.strictEqual(placed[0].physicalFinalMm - placed[0].physicalInicialMm, 1020);
-  assert.strictEqual(placed[0].recuperacaoMm, 1020);
-  const model = app.buildBulletinModel([interval(1000, 1020, "a")], { name: "T", items: [] }, new Date("2024-01-01T00:00:00Z"));
-  assert.strictEqual(model.rows[0].recoveryMm, 1000);
-  assert.strictEqual(model.rows[0].recovery, "1,00 m");
-  assert.strictEqual(model.rows[0].ratio, "100%");
-  assert.strictEqual(model.stats.recovery, 1000);
-  assert.strictEqual(placed[0].recuperacaoMm, 1020);
 });
 
 check("a profundidade da caixa arredonda o centímetro para 0 ou 5", () => {
