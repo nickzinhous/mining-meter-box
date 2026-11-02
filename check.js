@@ -149,6 +149,72 @@ check("a caixa guarda a recuperação real e o taquinho só arredonda o texto", 
   assert.strictEqual(app.formatTaquinhoMeters(placed[0].profundidadeFinalMm), "1,00 m");
 });
 
+check("totais e porcentagem somam manobras já arredondadas", () => {
+  assert.strictEqual(app.roundCoreMm(1010), 1000);
+  assert.strictEqual(app.roundCoreMm(1020), 1000);
+  assert.strictEqual(app.roundCoreMm(1030), 1050);
+  assert.strictEqual(app.roundCoreMm(1040), 1050);
+  assert.strictEqual(app.roundCoreMm(1060), 1050);
+  assert.strictEqual(app.roundCoreMm(1070), 1050);
+  assert.strictEqual(app.roundCoreMm(1080), 1100);
+  assert.strictEqual(app.roundCoreMm(1090), 1100);
+
+  const a = app.accumulateIntervals([interval(1000, 1020, "a")]);
+  assert.strictEqual(a[0].physicalFinalMm - a[0].physicalInicialMm, 1020);
+  const totalsA = app.roundedTotals(a);
+  assert.strictEqual(totalsA.advanceMm, 1000);
+  assert.strictEqual(totalsA.recoveryMm, 1000);
+  assert.strictEqual(app.formatRatio(totalsA.advanceMm, totalsA.recoveryMm), "100%");
+
+  const b = app.accumulateIntervals([interval(1000, 980, "b")]);
+  assert.strictEqual(b[0].physicalFinalMm - b[0].physicalInicialMm, 980);
+  assert.strictEqual(app.roundedTotals(b).recoveryMm, 1000);
+
+  const c = app.accumulateIntervals([
+    interval(1000, 980, "c1"),
+    interval(1000, 1020, "c2"),
+    interval(1000, 970, "c3"),
+  ]);
+  assert.strictEqual(
+    c.reduce((sum, row) => sum + (row.physicalFinalMm - row.physicalInicialMm), 0),
+    2970,
+  );
+  assert.strictEqual(app.formatTaquinhoMeters(c[0].recuperacaoMm), "1,00 m");
+  assert.strictEqual(app.formatTaquinhoMeters(c[1].recuperacaoMm), "1,00 m");
+  assert.strictEqual(app.formatTaquinhoMeters(c[2].recuperacaoMm), "0,95 m");
+  const totalsC = app.roundedTotals(c);
+  assert.strictEqual(totalsC.advanceMm, 3000);
+  assert.strictEqual(totalsC.recoveryMm, 2950);
+  assert.strictEqual(app.roundedDepthAt(c, 3), 3000);
+  assert.strictEqual(app.formatRoundedDepthSpan(c, 0), "0,00–1,00 m");
+  assert.strictEqual(app.formatRatio(totalsC.advanceMm, totalsC.recoveryMm), "98,3%");
+
+  const d = app.accumulateIntervals([interval(1050, 1050, "d")]);
+  assert.strictEqual(d[0].physicalFinalMm - d[0].physicalInicialMm, 1050);
+  assert.strictEqual(app.formatTaquinhoMeters(1050), "1,05 m");
+  const e = app.accumulateIntervals([interval(1000, 930, "e")]);
+  assert.strictEqual(e[0].physicalFinalMm - e[0].physicalInicialMm, 930);
+  assert.strictEqual(app.formatTaquinhoMeters(930), "0,95 m");
+
+  assert.strictEqual(app.recoveryExceedsAdvance(1000, 1030), true);
+
+  const model = app.buildBulletinModel(
+    [interval(1000, 980, "m1"), interval(1000, 1020, "m2")],
+    { name: "F-ARRED", ended: false },
+    new Date("2026-01-15T12:00:00Z"),
+  );
+  assert.strictEqual(model.stats.advance, 2000);
+  assert.strictEqual(model.stats.recovery, 2000);
+  assert.strictEqual(model.stats.depth, 2000);
+  assert.strictEqual(model.rows[0].recovery, "1,00 m");
+  assert.strictEqual(model.rows[1].recovery, "1,00 m");
+  assert.strictEqual(model.rows[0].advance, "1,00 m");
+  assert.strictEqual(
+    model.rows.reduce((sum, row) => sum + row.recoveryMm, 0),
+    model.stats.recovery,
+  );
+});
+
 check("a profundidade da caixa arredonda o centímetro para 0 ou 5", () => {
   const um = (meters) => Math.round(meters * 1000000);
   assert.strictEqual(app.formatBoxDepth(um(2.91)), "2,90 m");

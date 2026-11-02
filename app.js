@@ -432,6 +432,34 @@ function formatTaquinhoSpan(startMm, endMm) {
   return `${formatTaquinhoMeters(startMm).replace(/ m$/, "")}–${formatTaquinhoMeters(endMm)}`;
 }
 
+/** Soma mm arredondando cada valor com roundCoreMm (em cm inteiros). */
+function sumRoundedCoreMm(values) {
+  let cm = 0;
+  for (const mm of values) cm += cmFromMm(roundCoreMm(mm));
+  return cm * MM;
+}
+
+/** Profundidade acumulada pelos avanços arredondados até o índice (exclusive). */
+function roundedDepthAt(intervals, indexAfter) {
+  let cm = 0;
+  const limit = Math.max(0, Math.min(indexAfter, intervals.length));
+  for (let i = 0; i < limit; i += 1) cm += cmFromMm(roundCoreMm(intervals[i].avancoMm));
+  return cm * MM;
+}
+
+function formatRoundedDepthSpan(intervals, index) {
+  const from = roundedDepthAt(intervals, index);
+  const to = roundedDepthAt(intervals, index + 1);
+  return `${metersLabel(from)}–${formatMeters(to)}`;
+}
+
+function roundedTotals(intervals) {
+  return {
+    advanceMm: sumRoundedCoreMm(intervals.map((item) => item.avancoMm)),
+    recoveryMm: sumRoundedCoreMm(intervals.map((item) => item.recuperacaoMm)),
+  };
+}
+
 /** Primeiro encaixe de taquinho que termina depois de `mm`. */
 function markerFrom(mm) {
   let slot = placement(mm);
@@ -1161,7 +1189,7 @@ function drawTaquinhos(root, intervals, ended, pickedId = selectedId) {
     const lines = [
       `A: ${formatTaquinhoMeters(t.avancoMm)}`,
       `R: ${formatTaquinhoMeters(t.recuperacaoMm)}`,
-      `P: ${formatTaquinhoSpan(t.profundidadeInicialMm, t.profundidadeFinalMm)}`,
+      `P: ${formatRoundedDepthSpan(intervals, t.index)}`,
     ];
     if (t.geo?.litologia) lines.push(t.geo.litologia);
     appendTaquinho(
@@ -1226,8 +1254,9 @@ function intervalSearchText(interval) {
     materialName(normalizeHex(interval.color)),
     interval.info || "",
     depthSpan(interval),
-    formatMeters(interval.avancoMm),
-    formatMeters(interval.recuperacaoMm),
+    formatTaquinhoMeters(interval.avancoMm),
+    formatTaquinhoMeters(interval.recuperacaoMm),
+    formatRoundedDepthSpan([interval], 0),
     interval.geo?.litologia || "",
     interval.geo?.alteracao || "",
     interval.geo?.fraturamento || "",
@@ -1275,7 +1304,7 @@ function renderList(intervals) {
     const where = place
       ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`
       : "Sem testemunho na caixa";
-    const depth = formatTaquinhoSpan(t.profundidadeInicialMm, t.profundidadeFinalMm);
+    const depth = formatRoundedDepthSpan(intervals, t.index);
     const recovered = hasCore
       ? `${metersLabel(t.physicalInicialMm)}–${formatMeters(t.physicalFinalMm)}`
       : place
@@ -1288,7 +1317,9 @@ function renderList(intervals) {
         : recoveryExceedsAdvance(t.avancoMm, t.recuperacaoMm)
           ? `<span class="loss-badge is-excess">R &gt; A</span>`
           : "";
-    const tone = ratioTone(t.avancoMm > 0 ? (t.recuperacaoMm / t.avancoMm) * 100 : null);
+    const advanceShown = roundCoreMm(t.avancoMm);
+    const recoveryShown = roundCoreMm(t.recuperacaoMm);
+    const tone = ratioTone(advanceShown > 0 ? (recoveryShown / advanceShown) * 100 : null);
     const open = openCardId === t.id;
     li.classList.toggle("is-open", open);
     li.innerHTML = `
@@ -1298,14 +1329,14 @@ function renderList(intervals) {
           <strong>Taquinho ${t.index + 1}${badge}</strong>
           <span class="card-meta">${depth}</span>
         </span>
-        <span class="card-pct ${tone}">${formatRatio(t.avancoMm, t.recuperacaoMm)}</span>
+        <span class="card-pct ${tone}">${formatRatio(advanceShown, recoveryShown)}</span>
         <span class="card-chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4.5 6.2 8 9.8l3.5-3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </button>
       <div class="card-panel">
         <dl class="specs">
           <div class="spec-line"><dt>Avanço</dt><dd>${formatTaquinhoMeters(t.avancoMm)}</dd></div>
           <div class="spec-line"><dt>Recuperação</dt><dd>${formatTaquinhoMeters(t.recuperacaoMm)}</dd></div>
-          <div class="spec-line"><dt>Percentual</dt><dd>${formatRatio(t.avancoMm, t.recuperacaoMm)}</dd></div>
+          <div class="spec-line"><dt>Percentual</dt><dd>${formatRatio(advanceShown, recoveryShown)}</dd></div>
           <div class="spec-line"><dt>Na caixa</dt><dd>${recovered}</dd></div>
           <div class="spec-line"><dt>Posição</dt><dd>${where}</dd></div>
           <div class="spec-line"><dt>Cor</dt><dd>${escapeHtml(materialName(color))}</dd></div>
@@ -1404,7 +1435,7 @@ function renderIntervalOptions(intervals) {
   for (const interval of intervals) {
     const option = document.createElement("option");
     option.value = String(interval.index);
-    option.textContent = `Taquinho ${interval.index + 1} · ${formatMeters(interval.profundidadeInicialMm)}–${formatMeters(interval.profundidadeFinalMm)}`;
+    option.textContent = `Taquinho ${interval.index + 1} · ${formatRoundedDepthSpan(intervals, interval.index)}`;
     select.appendChild(option);
   }
   if ([...select.options].some((option) => option.value === previous)) {
@@ -2438,7 +2469,7 @@ function showTagTip(interval, clientX, clientY) {
   const place = intervalBlock(interval);
   tipRow(dl, "A · Avanço", formatTaquinhoMeters(interval.avancoMm));
   tipRow(dl, "R · Recuperação", formatTaquinhoMeters(interval.recuperacaoMm));
-  tipRow(dl, "P · Profundidade", formatTaquinhoSpan(interval.profundidadeInicialMm, interval.profundidadeFinalMm));
+  tipRow(dl, "P · Profundidade", formatRoundedDepthSpan(currentIntervals(), interval.index));
   if (place) tipRow(dl, "Na caixa", `Caixa ${place.box + 1} · canaleta ${place.channel + 1}`);
   if (interval.info) tipRow(dl, "Informação", interval.info);
   tip.appendChild(dl);
@@ -2894,9 +2925,10 @@ function renderHoleStatus(intervals) {
       const recovery = document.getElementById("stat-recovery");
       const ratio = document.getElementById("stat-ratio");
       const boxes = document.getElementById("stat-boxes");
-      if (advance) advance.textContent = formatMeters(last.profundidadeFinalMm);
-      if (recovery) recovery.textContent = formatMeters(last.recuperacaoFinalMm);
-      if (ratio) ratio.textContent = formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm);
+      const totals = roundedTotals(intervals);
+      if (advance) advance.textContent = formatMeters(totals.advanceMm);
+      if (recovery) recovery.textContent = formatMeters(totals.recoveryMm);
+      if (ratio) ratio.textContent = formatRatio(totals.advanceMm, totals.recoveryMm);
       if (boxes) boxes.textContent = String(boxCount());
       const channels = document.getElementById("stat-channels");
       const loss = document.getElementById("stat-loss");
@@ -2907,8 +2939,8 @@ function renderHoleStatus(intervals) {
       }
       renderAudit(intervals);
       renderLithologyLegend(intervals);
-      const pct = last.profundidadeFinalMm > 0
-        ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
+      const pct = totals.advanceMm > 0
+        ? Math.round((totals.recoveryMm / totals.advanceMm) * 1000) / 10
         : null;
       if (ratio) {
         ratio.classList.toggle("is-bad", pct != null && pct < 70);
@@ -2919,7 +2951,7 @@ function renderHoleStatus(intervals) {
   if (next) {
     const fimNote = currentHole()?.ended ? " Fim de furo marcado." : "";
     next.textContent = last
-      ? `Próximo intervalo começa em ${formatMeters(last.profundidadeFinalMm)}.${fimNote}`
+      ? `Próximo intervalo começa em ${formatMeters(roundedDepthAt(intervals, intervals.length))}.${fimNote}`
       : "O primeiro intervalo começa em 0,00 m.";
   }
   syncLogActions();
@@ -2966,13 +2998,14 @@ function holeFacts(hole) {
   const intervals = accumulateIntervals(hole.items);
   const last = intervals[intervals.length - 1];
   if (!last) return null;
-  const pct = last.profundidadeFinalMm > 0
-    ? Math.round((last.recuperacaoFinalMm / last.profundidadeFinalMm) * 1000) / 10
+  const totals = roundedTotals(intervals);
+  const pct = totals.advanceMm > 0
+    ? Math.round((totals.recoveryMm / totals.advanceMm) * 1000) / 10
     : null;
   return {
-    depth: formatMeters(last.profundidadeFinalMm),
-    recovery: formatMeters(last.recuperacaoFinalMm),
-    ratio: formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm),
+    depth: formatMeters(totals.advanceMm),
+    recovery: formatMeters(totals.recoveryMm),
+    ratio: formatRatio(totals.advanceMm, totals.recoveryMm),
     pct,
     boxes: boxesFor(intervals, hole.ended),
   };
@@ -3713,11 +3746,14 @@ function renderIntervalPanel() {
   if (body) {
     body.replaceChildren();
     const place = intervalBlock(interval);
+    const intervals = currentIntervals();
+    const advanceShown = roundCoreMm(interval.avancoMm);
+    const recoveryShown = roundCoreMm(interval.recuperacaoMm);
     const rows = [
-      ["Profundidade", formatTaquinhoSpan(interval.profundidadeInicialMm, interval.profundidadeFinalMm)],
+      ["Profundidade", formatRoundedDepthSpan(intervals, interval.index)],
       ["Avanço", formatTaquinhoMeters(interval.avancoMm)],
       ["Recuperação", formatTaquinhoMeters(interval.recuperacaoMm)],
-      ["Percentual", formatRatio(interval.avancoMm, interval.recuperacaoMm)],
+      ["Percentual", formatRatio(advanceShown, recoveryShown)],
       ["Na caixa", place ? `Caixa ${place.box + 1} · canaleta ${place.channel + 1}` : "Sem testemunho"],
     ];
     if (interval.geo?.litologia) rows.push(["Litologia", interval.geo.litologia]);
@@ -4007,14 +4043,16 @@ function showInterval(id) {
   revealInterval(id, { zoom: true });
 }
 
-function intervalLine(interval) {
+function intervalLine(interval, intervals = currentIntervals()) {
   const place = intervalBlock(interval);
   const where = place ? `caixa ${place.box + 1}, canaleta ${place.channel + 1}` : "sem testemunho";
   const inbox = interval.recuperacaoMm > 0
     ? `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`
     : "—";
   const geo = interval.geo?.litologia ? ` · ${interval.geo.litologia}` : "";
-  return `${interval.index + 1}. P ${depthSpan(interval)} · A ${formatMeters(interval.avancoMm)} · R ${formatMeters(interval.recuperacaoMm)} (${formatRatio(interval.avancoMm, interval.recuperacaoMm)}) · na caixa ${inbox} · ${where}${geo}${interval.info ? ` · ${interval.info}` : ""}`;
+  const advanceShown = roundCoreMm(interval.avancoMm);
+  const recoveryShown = roundCoreMm(interval.recuperacaoMm);
+  return `${interval.index + 1}. P ${formatRoundedDepthSpan(intervals, interval.index)} · A ${formatTaquinhoMeters(interval.avancoMm)} · R ${formatTaquinhoMeters(interval.recuperacaoMm)} (${formatRatio(advanceShown, recoveryShown)}) · na caixa ${inbox} · ${where}${geo}${interval.info ? ` · ${interval.info}` : ""}`;
 }
 
 function reportText() {
@@ -4022,14 +4060,15 @@ function reportText() {
   const name = currentHole()?.name.trim() || "Sem nome";
   const last = intervals[intervals.length - 1];
   if (!last) return "";
+  const totals = roundedTotals(intervals);
   const lines = [
     `Pandora · Furo ${name}`,
-    `Avanço ${formatMeters(last.profundidadeFinalMm)}`,
-    `Recuperação ${formatMeters(last.recuperacaoFinalMm)} (${formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm)})`,
+    `Avanço ${formatMeters(totals.advanceMm)}`,
+    `Recuperação ${formatMeters(totals.recoveryMm)} (${formatRatio(totals.advanceMm, totals.recoveryMm)})`,
     `Caixas ${boxCount()}`,
     "",
   ];
-  for (const interval of intervals) lines.push(intervalLine(interval));
+  for (const interval of intervals) lines.push(intervalLine(interval, intervals));
   if (currentHole()?.ended) lines.push("Fim de furo");
   return lines.join("\n");
 }
@@ -4066,16 +4105,18 @@ function downloadTable() {
     const inbox = interval.recuperacaoMm > 0
       ? `${metersLabel(interval.physicalInicialMm)}–${formatMeters(interval.physicalFinalMm)}`
       : "";
+    const advanceShown = roundCoreMm(interval.avancoMm);
+    const recoveryShown = roundCoreMm(interval.recuperacaoMm);
     rows.push([
       name,
       String(interval.index + 1),
-      depthSpan(interval),
-      formatMeters(interval.avancoMm),
-      formatMeters(interval.recuperacaoMm),
+      formatRoundedDepthSpan(intervals, interval.index),
+      formatTaquinhoMeters(interval.avancoMm),
+      formatTaquinhoMeters(interval.recuperacaoMm),
       inbox,
       place ? String(place.box + 1) : "",
       place ? String(place.channel + 1) : "",
-      formatRatio(interval.avancoMm, interval.recuperacaoMm),
+      formatRatio(advanceShown, recoveryShown),
       materialName(normalizeHex(interval.color)),
       interval.info || "",
       interval.geo?.litologia || "",
@@ -4231,8 +4272,9 @@ async function fillPrintSheet(mode) {
     return recoverySegments(interval.physicalInicialMm, interval.physicalFinalMm).some((seg) => seg.box === boxIndex);
   });
   const title = mode === "sheet" ? `Ficha da caixa ${String(boxIndex + 1).padStart(2, "0")}` : "Relatório da sondagem";
+  const totals = roundedTotals(intervals);
   const head = last
-    ? `Avanço ${formatMeters(last.profundidadeFinalMm)} · Recuperação ${formatMeters(last.recuperacaoFinalMm)} · ${formatRatio(last.profundidadeFinalMm, last.recuperacaoFinalMm)} · ${boxCount()} caixa(s) · ${usedChannels(intervals)} canaleta(s)`
+    ? `Avanço ${formatMeters(totals.advanceMm)} · Recuperação ${formatMeters(totals.recoveryMm)} · ${formatRatio(totals.advanceMm, totals.recoveryMm)} · ${boxCount()} caixa(s) · ${usedChannels(intervals)} canaleta(s)`
     : "Nenhum intervalo lançado.";
   sheet.replaceChildren();
   const h1 = document.createElement("h1");
@@ -4256,12 +4298,14 @@ async function fillPrintSheet(mode) {
       interval.info,
     ].filter(Boolean).join(" · ");
     const tr = document.createElement("tr");
+    const advanceShown = roundCoreMm(interval.avancoMm);
+    const recoveryShown = roundCoreMm(interval.recuperacaoMm);
     for (const value of [
       String(interval.index + 1),
-      depthSpan(interval),
-      formatMeters(interval.avancoMm),
-      formatMeters(interval.recuperacaoMm),
-      formatRatio(interval.avancoMm, interval.recuperacaoMm),
+      formatRoundedDepthSpan(intervals, interval.index),
+      formatTaquinhoMeters(interval.avancoMm),
+      formatTaquinhoMeters(interval.recuperacaoMm),
+      formatRatio(advanceShown, recoveryShown),
       where,
       geo,
     ]) {
@@ -4617,289 +4661,6 @@ function bindChrome() {
   });
 }
 
-function halloweenSeasonActive(now = new Date()) {
-  const month = now.getMonth();
-  const day = now.getDate();
-  return (month === 9 && day >= 20) || (month === 10 && day <= 5);
-}
-
-function playHauntSound() {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) return;
-  const ctx = new AudioCtx();
-  const now = ctx.currentTime;
-  const master = ctx.createGain();
-  master.gain.setValueAtTime(0.0001, now);
-  master.gain.exponentialRampToValueAtTime(0.7, now + 0.05);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + 2.8);
-  master.connect(ctx.destination);
-
-  // Risada sinistra: rajadas tipo "há-há-há-hááá".
-  const bursts = [
-    { t: 0, f: 260, dur: 0.12, g: 0.28 },
-    { t: 0.16, f: 320, dur: 0.11, g: 0.26 },
-    { t: 0.3, f: 290, dur: 0.1, g: 0.24 },
-    { t: 0.44, f: 360, dur: 0.13, g: 0.3 },
-    { t: 0.62, f: 240, dur: 0.1, g: 0.22 },
-    { t: 0.76, f: 340, dur: 0.12, g: 0.28 },
-    { t: 0.94, f: 300, dur: 0.11, g: 0.25 },
-    { t: 1.12, f: 400, dur: 0.18, g: 0.32 },
-    { t: 1.4, f: 220, dur: 0.28, g: 0.26 },
-    { t: 1.75, f: 180, dur: 0.45, g: 0.22 },
-  ];
-
-  for (const burst of bursts) {
-    const t0 = now + burst.t;
-    const filter = ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(burst.f, t0);
-    filter.frequency.exponentialRampToValueAtTime(burst.f * 0.72, t0 + burst.dur);
-    filter.Q.value = 4.5;
-
-    const voice = ctx.createOscillator();
-    voice.type = "sawtooth";
-    voice.frequency.setValueAtTime(burst.f, t0);
-    voice.frequency.exponentialRampToValueAtTime(Math.max(90, burst.f * 0.65), t0 + burst.dur);
-
-    const breath = ctx.createOscillator();
-    breath.type = "triangle";
-    breath.frequency.setValueAtTime(burst.f * 1.5, t0);
-    breath.frequency.exponentialRampToValueAtTime(Math.max(120, burst.f * 0.9), t0 + burst.dur);
-
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(burst.g, t0 + 0.02);
-    g.gain.exponentialRampToValueAtTime(burst.g * 0.7, t0 + burst.dur * 0.45);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + burst.dur);
-
-    voice.connect(filter);
-    breath.connect(filter);
-    filter.connect(g);
-    g.connect(master);
-    voice.start(t0);
-    breath.start(t0);
-    voice.stop(t0 + burst.dur + 0.04);
-    breath.stop(t0 + burst.dur + 0.04);
-
-    // Sopro/aspiração entre as risadas.
-    const noiseLen = Math.floor(ctx.sampleRate * burst.dur);
-    const buffer = ctx.createBuffer(1, Math.max(1, noiseLen), ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i += 1) {
-      const env = Math.sin((Math.PI * i) / data.length);
-      data[i] = (Math.random() * 2 - 1) * env * 0.45;
-    }
-    const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
-    const noiseFilter = ctx.createBiquadFilter();
-    noiseFilter.type = "bandpass";
-    noiseFilter.frequency.value = burst.f * 1.1;
-    noiseFilter.Q.value = 1.2;
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.0001, t0);
-    noiseGain.gain.exponentialRampToValueAtTime(0.16, t0 + 0.015);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + burst.dur);
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(master);
-    noise.start(t0);
-    noise.stop(t0 + burst.dur + 0.02);
-  }
-
-  // Eco grave no final.
-  const echo = ctx.createOscillator();
-  const echoGain = ctx.createGain();
-  echo.type = "sine";
-  echo.frequency.setValueAtTime(95, now + 1.9);
-  echo.frequency.exponentialRampToValueAtTime(55, now + 2.6);
-  echoGain.gain.setValueAtTime(0.0001, now + 1.9);
-  echoGain.gain.exponentialRampToValueAtTime(0.12, now + 2.0);
-  echoGain.gain.exponentialRampToValueAtTime(0.0001, now + 2.65);
-  echo.connect(echoGain);
-  echoGain.connect(master);
-  echo.start(now + 1.9);
-  echo.stop(now + 2.7);
-
-  window.setTimeout(() => {
-    ctx.close().catch(() => {});
-  }, 3200);
-}
-
-function bindHauntEgg() {
-  const marks = document.querySelectorAll(".brand-mark");
-  if (!marks.length) return;
-
-  let taps = 0;
-  let tapTimer = 0;
-  let haunted = false;
-  let toastTimer = 0;
-  let dripTimer = 0;
-
-  const batSvg =
-    '<svg class="haunt-bat" viewBox="0 0 64 28" aria-hidden="true"><path d="M32 16c-2.2-3.4-5.8-6.2-10.4-7.4 1.8 2.6 2.2 5.2 1.1 7.6-3.6-1.2-7.5-1-11.2.8C15.2 12.2 21 8.4 27.4 7.2 24.8 4.4 22 2.2 18.6 1.2c5.2 1.2 9.6 3.8 12.2 7.4C33.4 5 37.8 2.4 43 1.2 39.6 2.2 36.8 4.4 34.2 7.2 40.6 8.4 46.4 12.2 50.1 17c-3.7-1.8-7.6-2-11.2-.8-1.1-2.4-.7-5 1.1-7.6C35.8 9.8 32.2 12.6 32 16Z"/></svg>';
-
-  const ensureSky = () => {
-    let sky = document.getElementById("haunt-sky");
-    if (sky) return sky;
-    sky = document.createElement("div");
-    sky.id = "haunt-sky";
-    sky.className = "haunt-sky";
-    sky.hidden = true;
-    sky.setAttribute("aria-hidden", "true");
-
-    const veil = document.createElement("div");
-    veil.className = "haunt-veil";
-    const mist = document.createElement("div");
-    mist.className = "haunt-mist";
-    const grain = document.createElement("div");
-    grain.className = "haunt-grain";
-    const eyes = document.createElement("div");
-    eyes.className = "haunt-eyes";
-    eyes.innerHTML = '<span></span><span></span>';
-
-    const flock = document.createElement("div");
-    flock.className = "haunt-flock";
-    const lanes = [
-      { y: "10%", s: 0.75, d: "11s", delay: "0s" },
-      { y: "18%", s: 1.15, d: "8.5s", delay: "0.7s" },
-      { y: "28%", s: 0.9, d: "13s", delay: "1.8s" },
-      { y: "38%", s: 1.35, d: "9.5s", delay: "0.3s" },
-      { y: "48%", s: 0.8, d: "12s", delay: "2.4s" },
-      { y: "58%", s: 1.05, d: "10s", delay: "1.1s" },
-      { y: "68%", s: 0.7, d: "14s", delay: "3.2s" },
-      { y: "22%", s: 1.5, d: "7.8s", delay: "2s" },
-      { y: "42%", s: 0.95, d: "11.5s", delay: "4s" },
-      { y: "72%", s: 1.2, d: "9s", delay: "1.5s" },
-    ];
-    for (const lane of lanes) {
-      const wrap = document.createElement("div");
-      wrap.className = "haunt-lane";
-      wrap.style.setProperty("--haunt-y", lane.y);
-      wrap.style.setProperty("--haunt-s", String(lane.s));
-      wrap.style.setProperty("--haunt-d", lane.d);
-      wrap.style.setProperty("--haunt-delay", lane.delay);
-      wrap.innerHTML = batSvg;
-      flock.appendChild(wrap);
-    }
-
-    const drips = document.createElement("div");
-    drips.className = "haunt-drips";
-    for (let i = 0; i < 7; i += 1) {
-      const drop = document.createElement("i");
-      drop.style.setProperty("--drip-x", `${8 + i * 13}%`);
-      drop.style.setProperty("--drip-delay", `${i * 0.45}s`);
-      drop.style.setProperty("--drip-dur", `${2.4 + (i % 3) * 0.5}s`);
-      drips.appendChild(drop);
-    }
-
-    sky.append(veil, mist, grain, eyes, flock, drips);
-    document.body.appendChild(sky);
-    return sky;
-  };
-
-  const showToast = (message) => {
-    let toast = document.getElementById("haunt-toast");
-    if (!toast) {
-      toast = document.createElement("div");
-      toast.id = "haunt-toast";
-      toast.className = "haunt-toast";
-      toast.setAttribute("role", "status");
-      document.body.appendChild(toast);
-    }
-    toast.innerHTML = "";
-    const lead = document.createElement("strong");
-    lead.textContent = "Algo se mexeu na canaleta.";
-    const line = document.createElement("span");
-    line.textContent = message;
-    toast.append(lead, line);
-    toast.hidden = false;
-    toast.classList.add("is-on");
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => {
-      toast.classList.remove("is-on");
-      toast.hidden = true;
-    }, 5200);
-  };
-
-  const setTitles = (on) => {
-    document.querySelectorAll(".brand h1").forEach((node) => {
-      if (!(node instanceof HTMLElement)) return;
-      if (on) {
-        if (!node.dataset.plainTitle) node.dataset.plainTitle = node.textContent || "Pandora";
-        node.textContent = "Pandora Assombrada";
-      } else if (node.dataset.plainTitle) {
-        node.textContent = node.dataset.plainTitle;
-      }
-    });
-  };
-
-  const hauntColors = {
-    bg: "#070304",
-    text: "#f3d5b5",
-    box: "#2a1410",
-    channel: "#0c0506",
-    taquinho: "#e85d04",
-    accent: "#e85d04",
-  };
-
-  const setHaunted = (on) => {
-    haunted = on;
-    document.documentElement.classList.toggle("is-haunted", on);
-    document.body.classList.toggle("is-haunting", false);
-    const sky = ensureSky();
-    sky.hidden = !on;
-    setTitles(on);
-    window.clearTimeout(dripTimer);
-    if (on) {
-      paintTheme(document.documentElement, hauntColors);
-      document.body.classList.add("is-haunting");
-      playHauntSound();
-      showToast("A caixa abriu sozinha. Profundidade: desconhecida.");
-      dripTimer = window.setTimeout(() => {
-        document.body.classList.remove("is-haunting");
-      }, 900);
-    } else if (appliedTheme?.colors) {
-      paintTheme(document.documentElement, appliedTheme.colors);
-    }
-  };
-
-  if (halloweenSeasonActive()) {
-    document.documentElement.classList.add("haunt-season");
-  }
-
-  for (const mark of marks) {
-    if (!(mark instanceof HTMLElement)) continue;
-    mark.tabIndex = 0;
-    mark.setAttribute("role", "button");
-    mark.setAttribute(
-      "aria-label",
-      halloweenSeasonActive()
-        ? "Marca Pandora. Quem sabe o que acontece se insistir…"
-        : "Marca Pandora",
-    );
-    const tap = () => {
-      taps += 1;
-      window.clearTimeout(tapTimer);
-      tapTimer = window.setTimeout(() => {
-        taps = 0;
-      }, 1600);
-      if (taps < 5) return;
-      taps = 0;
-      setHaunted(!haunted);
-    };
-    mark.addEventListener("click", tap);
-    mark.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      tap();
-    });
-  }
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && haunted) setHaunted(false);
-  });
-}
-
 if (typeof document !== "undefined") {
   bindPalette();
   bindAuth();
@@ -4912,7 +4673,6 @@ if (typeof document !== "undefined") {
   bindInverse();
   bindZoom();
   bindProbe();
-  bindHauntEgg();
   renderAll();
   const session = readSession();
   if (session) showApp(session.username);
@@ -5014,31 +4774,33 @@ function buildBulletinModel(items, hole, generatedAt) {
   let zero = 0;
   let invalid = 0;
   const rows = placed.map((interval) => {
-    advance += interval.avancoMm;
-    recovery += interval.recuperacaoMm;
+    const advanceShown = roundCoreMm(interval.avancoMm);
+    const recoveryShown = roundCoreMm(interval.recuperacaoMm);
+    advance += advanceShown;
+    recovery += recoveryShown;
     const valid = interval.avancoMm > 0 && interval.recuperacaoMm >= 0 && !recoveryExceedsAdvance(interval.avancoMm, interval.recuperacaoMm);
-    const lostMm = valid ? Math.max(0, interval.avancoMm - interval.recuperacaoMm) : null;
+    const lostMm = valid ? Math.max(0, advanceShown - recoveryShown) : null;
     if (!valid) {
       lostClosed = false;
       invalid += 1;
     } else lostValid += lostMm;
     if (valid && interval.recuperacaoMm === 0) zero += 1;
-    else if (valid && lostMm > 0) partial += 1;
+    else if (valid && interval.recuperacaoMm < interval.avancoMm) partial += 1;
     const place = bulletinPlace(interval);
     return {
       id: interval.id,
       n: interval.index + 1,
-      from: formatMeters(interval.profundidadeInicialMm),
-      to: formatMeters(interval.profundidadeFinalMm),
-      depth: depthSpan(interval),
-      advanceMm: interval.avancoMm,
-      recoveryMm: interval.recuperacaoMm,
+      from: formatMeters(roundedDepthAt(placed, interval.index)),
+      to: formatMeters(roundedDepthAt(placed, interval.index + 1)),
+      depth: formatRoundedDepthSpan(placed, interval.index),
+      advanceMm: advanceShown,
+      recoveryMm: recoveryShown,
       lostMm,
-      advance: formatMeters(interval.avancoMm),
-      recovery: formatMeters(interval.recuperacaoMm),
+      advance: formatMeters(advanceShown),
+      recovery: formatMeters(recoveryShown),
       lost: lostMm == null ? "—" : formatMeters(lostMm),
-      ratio: formatRatio(interval.avancoMm, interval.recuperacaoMm),
-      pct: interval.avancoMm > 0 ? (interval.recuperacaoMm / interval.avancoMm) * 100 : null,
+      ratio: formatRatio(advanceShown, recoveryShown),
+      pct: advanceShown > 0 ? (recoveryShown / advanceShown) * 100 : null,
       boxes: joinList(place.boxes),
       channels: joinList(place.channels),
       where: place.core
@@ -5092,7 +4854,7 @@ function buildBulletinModel(items, hole, generatedAt) {
       zero,
       invalid,
       count: rows.length,
-      depth: placed.length ? placed[placed.length - 1].profundidadeFinalMm : 0,
+      depth: roundedDepthAt(placed, placed.length),
     },
     rows,
     slices,
@@ -5157,6 +4919,11 @@ if (typeof module !== "undefined" && module.exports) {
     formatMeters,
     roundCoreMm,
     formatTaquinhoMeters,
+    sumRoundedCoreMm,
+    roundedDepthAt,
+    formatRoundedDepthSpan,
+    roundedTotals,
+    formatRatio,
     findIntervalAtDepth,
     findIntervalAtRecovery,
     tapeUmFromDepth,
