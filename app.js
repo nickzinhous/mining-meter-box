@@ -1039,38 +1039,45 @@ function drawMeterMarks(parent, intervals) {
     if (x == null) continue;
     const y = yFromBase(box.y0, mark.localCm);
     const digits = String(mark.meter).length;
-    const tickH = 0.9;
-    const gap = 0.22;
-    const fontSize = digits >= 3 ? 0.38 : digits === 2 ? 0.48 : 0.58;
+    const tickLen = 1.25;
+    const inset = 0.28;
+    const gap = 0.48;
+    const fontSize = digits >= 3 ? 0.4 : digits === 2 ? 0.5 : 0.6;
     const key = `${mark.box}:${mark.channel}:${Math.round(y * 20)}`;
     let shift = 0;
     while (placed.some((item) => item.key === key && item.shift === shift)) shift += 1;
     placed.push({ key, shift });
-    // Risco à esquerda da canaleta, alinhado ao metro; número logo abaixo.
-    const tx = x - 0.55 - shift * 0.45;
+    // Risco horizontal à esquerda da canaleta, na linha do metro.
+    const x2 = x - inset - shift * 0.4;
+    const x1 = x2 - tickLen;
+    const midX = (x1 + x2) / 2;
+    // Número logo abaixo do risco; no topo da canaleta sobe para não cobrir o testemunho.
+    const nearTop = mark.localCm >= 96;
+    const labelY = nearTop ? y - gap : y + gap;
     const chip = el("g");
     const title = el("title");
     title.textContent = `${mark.meter} m`;
     chip.appendChild(title);
     chip.appendChild(
       el("line", {
-        x1: tx,
-        y1: y - tickH / 2,
-        x2: tx,
-        y2: y + tickH / 2,
+        x1,
+        y1: y,
+        x2,
+        y2: y,
         stroke: "var(--box-ink)",
-        "stroke-width": 1.35,
+        "stroke-width": 1.6,
         "stroke-linecap": "round",
         "vector-effect": "non-scaling-stroke",
       }),
     );
     const label = el("text", {
-      x: tx,
-      y: y + tickH / 2 + gap + fontSize * 0.35,
+      x: midX,
+      y: labelY,
       "text-anchor": "middle",
+      "dominant-baseline": nearTop ? "auto" : "hanging",
       fill: "var(--box-ink)",
       "font-size": fontSize,
-      "font-weight": "650",
+      "font-weight": "700",
       "font-family": "Inter, Segoe UI, system-ui, sans-serif",
     });
     label.textContent = String(mark.meter);
